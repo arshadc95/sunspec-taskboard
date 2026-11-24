@@ -61,8 +61,9 @@ const FLOW = [
 
 export function stackedArea(cfd) {
   const days = cfd?.days || [];
-  if (!days.length) return '';
-  const totals = days.map((_, index) => FLOW.reduce((sum, [key]) => sum + (cfd[key][index] || 0), 0));
+  const flow = FLOW.filter(([key]) => (cfd?.[key] || []).some((value) => value > 0));
+  if (!days.length || !flow.length) return '';
+  const totals = days.map((_, index) => flow.reduce((sum, [key]) => sum + (cfd[key][index] || 0), 0));
   if (!totals.some((value) => value > 0)) return '';
   const w = 640;
   const h = 200;
@@ -74,24 +75,24 @@ export function stackedArea(cfd) {
   const xAt = (index) => (days.length === 1 ? left + (w - left - 12) / 2 : left + (index / (days.length - 1)) * (w - left - 12));
   const yAt = (value) => top + plotH - (value / max) * plotH;
   let shapes = '';
-  for (let layer = FLOW.length - 1; layer >= 0; layer -= 1) {
-    const key = FLOW[layer][0];
+  for (let layer = flow.length - 1; layer >= 0; layer -= 1) {
+    const key = flow[layer][0];
     const topPts = [];
     const bottomPts = [];
     days.forEach((_, index) => {
-      const below = FLOW.slice(0, layer).reduce((sum, [name]) => sum + (cfd[name][index] || 0), 0);
+      const below = flow.slice(0, layer).reduce((sum, [name]) => sum + (cfd[name][index] || 0), 0);
       const here = below + (cfd[key][index] || 0);
       topPts.push(`${xAt(index).toFixed(1)},${yAt(here).toFixed(1)}`);
       bottomPts.push(`${xAt(index).toFixed(1)},${yAt(below).toFixed(1)}`);
     });
-    shapes += `<polygon points="${[...topPts, ...bottomPts.reverse()].join(' ')}" fill="${FLOW[layer][2]}"><title>${FLOW[layer][1]}</title></polygon>`;
+    shapes += `<polygon points="${[...topPts, ...bottomPts.reverse()].join(' ')}" fill="${flow[layer][2]}"><title>${flow[layer][1]}</title></polygon>`;
   }
   const probes = days.map((day, index) => {
-    const bits = FLOW.map(([key, label]) => `${label} ${cfd[key][index] || 0}`).join(', ');
+    const bits = flow.map(([key, label]) => `${label} ${cfd[key][index] || 0}`).join(', ');
     const slot = days.length === 1 ? 12 : Math.max(4, (w - left - 12) / (days.length - 1));
     return `<rect x="${(xAt(index) - slot / 2).toFixed(1)}" y="${top}" width="${slot.toFixed(1)}" height="${plotH}" fill="transparent"><title>${esc(day)}: ${bits}</title></rect>`;
   }).join('');
-  const legend = FLOW.map(([, label, color], index) => {
+  const legend = flow.map(([, label, color], index) => {
     const x = left + index * 110;
     return `<rect x="${x}" y="4" width="8" height="8" fill="${color}"/><text x="${x + 12}" y="12" font-size="10" fill="#111" font-family="Inter, sans-serif">${label}</text>`;
   }).join('');

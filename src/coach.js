@@ -21,10 +21,11 @@ const TIPS = [
   'Name the safe state. If the PLC stops, the plant should fail quietly, not wildly.',
 ];
 
-export function managerTip(now = new Date()) {
+export function managerTip(now = new Date(), { review = false } = {}) {
+  const pool = review ? TIPS : TIPS.filter((line) => !/review/i.test(line));
   const start = Date.UTC(now.getUTCFullYear(), 0, 0);
   const day = Math.floor((now.getTime() - start) / 86400000);
-  return TIPS[((day % TIPS.length) + TIPS.length) % TIPS.length];
+  return pool[((day % pool.length) + pool.length) % pool.length];
 }
 
 function tip(id, text, href, tone = 'note') {

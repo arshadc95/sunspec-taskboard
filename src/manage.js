@@ -132,7 +132,7 @@ export function buildManage(db, { projectId = null, days = 30, sort = 'name', di
     sparkOver.push(sample.filter((task) => task.due_date && task.due_date < todayDate(new Date(to))).length);
     const finished = doneIn(from, to);
     sparkDone.push(finished.length);
-    sparkCycle.push(round1(mean(finished.map((task) => (Date.parse(task.completed_at) - Date.parse(task.created_at)) / 86400000))) || 0);
+    sparkCycle.push(finished.length ? round1(mean(finished.map((task) => (Date.parse(task.completed_at) - Date.parse(task.created_at)) / 86400000))) : null);
   }
 
   const monday = weekStartDate(today);
@@ -285,6 +285,7 @@ export function buildManage(db, { projectId = null, days = 30, sort = 'name', di
       onTimeWeek,
       topFinisher: finisher && finisher.done >= 3 ? { name: finisher.name, done: finisher.done } : null,
     }),
-    managerTip: managerTip(now),
+    hasReview: live.some((task) => task.status === 'review'),
+    managerTip: managerTip(now, { review: live.some((task) => task.status === 'review') }),
   };
 }

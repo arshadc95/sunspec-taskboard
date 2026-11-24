@@ -46,8 +46,6 @@ import {
   kudosSummary,
   listProjects,
   listRemovedTasks,
-  listRunningTimers,
-  listTimeEntries,
   addGrokFile,
   addGrokMessage,
   boardSnapshot,
@@ -68,7 +66,6 @@ import {
   renameGrokThread,
   taskGrokLive,
   unansweredGrokMention,
-  getRunningTimer,
   markMentionsRead,
   myDay,
   notifyMentions,
@@ -78,14 +75,13 @@ import {
   stopTimer,
   stopTimersOnTask,
   teamBoard,
-  timeTotals,
   toggleKudo,
   unreadMentionCount,
 } from './db.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
-import { entrySeconds, formatDue, isValidDate, todayDate } from './time.js';
+import { formatDue, isValidDate, todayDate } from './time.js';
 import { buildManage } from './manage.js';
 import { fileExpiry, grokConnected, grokFileExpiry, isPdf, mountBot, pdfFilename, postGrokWebhook, rateLimitMessage, recentContext, webhookFiles } from './grok.js';
 import {
@@ -370,7 +366,7 @@ export function createApp(config) {
 
   app.get('/', requireUser, (req, res) => {
     const filters = readFilters(req);
-    const tasks = withTime(db, listTasks(db, filters));
+    const tasks = listTasks(db, filters);
     const people = listActiveUsers(db);
     html(res, 200, renderBoard({
       user: req.user,
@@ -550,7 +546,6 @@ export function createApp(config) {
       projects: listProjects(db),
       activity: listActivity(db, task.id),
       attachments: listAttachments(db, task.id),
-      timer: { ...timerView(db, task, req.user.id), canControl: canControlTimer(req.user, task) },
       canEdit: canEditTask(req.user, task),
       canDelete: canRemoveTask(req.user, task),
       canComplete: canCompleteTask(req.user, task),
@@ -1079,43 +1074,6 @@ export function createApp(config) {
   });
 
   return app;
-}
-
-function withTime(db, tasks) {
-  const totals = timeTotals(db);
-  const runningByTask = new Map();
-  for (const row of listRunningTimers(db)) {
-    if (!runningByTask.has(row.task_id)) runningByTask.set(row.task_id, []);
-    runningByTask.get(row.task_id).push(row);
-  }
-  return tasks.map((task) => ({
-    ...task,
-    time_seconds: totals.get(task.id) || 0,
-    running: runningByTask.get(task.id) || [],
-  }));
-}
-
-function timerView(db, task, userId) {
-  const entries = listTimeEntries(db, task.id);
-  const perUser = new Map();
-  let total = 0;
-  for (const entry of entries) {
-    const seconds = entrySeconds(entry.started_at, entry.ended_at);
-    total += seconds;
-    const current = perUser.get(entry.user_id) || { user_id: entry.user_id, user_name: entry.user_name, seconds: 0 };
-    current.seconds += seconds;
-    perUser.set(entry.user_id, current);
-  }
-  const running = getRunningTimer(db, userId);
-  return {
-    mine: running && running.task_id === task.id ? running : null,
-    other: running && running.task_id !== task.id ? running : null,
-    entries,
-    summary: {
-      total,
-      perUser: [...perUser.values()].sort((a, b) => b.seconds - a.seconds),
-    },
-  };
 }
 
 function readFilters(req) {

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
+import { formatDateTime, formatDue, isOverdue, shiftDate } from './time.js';
 
 const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
@@ -373,10 +373,6 @@ function completeControl(task, user, csrf, back, prominent = false) {
   </form>`;
 }
 
-function timeCell(task) {
-  return `<td class="time num">${esc(formatDuration(task.time_seconds || 0))}</td>`;
-}
-
 function taskCard(task, today, user, csrf, back) {
   const overdue = isOverdue(task.due_date, task.status, today);
   return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
@@ -386,7 +382,6 @@ function taskCard(task, today, user, csrf, back) {
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
       <span class="due">${esc(formatDue(task.due_date))}</span>
-      <span class="time">${esc(formatDuration(task.time_seconds || 0))}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
     <div class="card-actions">${completeControl(task, user, csrf, back)}</div>
@@ -403,7 +398,6 @@ function taskRow(task, today, user, csrf, back, highlight) {
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
     <td class="due">${esc(formatDue(task.due_date))}</td>
-    ${timeCell(task)}
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
     <td class="row-actions">${completeControl(task, user, csrf, back)}</td>
@@ -422,14 +416,14 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const cards = tasks.filter((task) => task.status !== 'done' || showDone).map((task) => taskCard(task, today, user, csrf, back)).join('');
   const table = `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
-          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th><th></th>
+          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Comments</th><th>Updated</th><th></th>
         </tr></thead>
         <tbody>
           ${openGroups.map((group) => `
-            <tr class="group"><td colspan="10">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
+            <tr class="group"><td colspan="9">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
             ${group.rows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}
           `).join('')}
-          ${doneRows.length ? `<tr class="group"><td colspan="10"><button type="button" class="done-toggle" data-done-toggle aria-expanded="${showDone ? 'true' : 'false'}">Done <span class="group-count">${doneRows.length}</span></button></td></tr>` : ''}
+          ${doneRows.length ? `<tr class="group"><td colspan="9"><button type="button" class="done-toggle" data-done-toggle aria-expanded="${showDone ? 'true' : 'false'}">Done <span class="group-count">${doneRows.length}</span></button></td></tr>` : ''}
         </tbody>
         ${doneRows.length ? `<tbody class="done-rows"${showDone ? '' : ' hidden'}>${doneRows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}</tbody>` : ''}
       </table></div>
@@ -507,7 +501,7 @@ function kudosButton({ csrf, type, id, count = 0, mine = false, back }) {
   </form>`;
 }
 
-export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], grokFiles = [], grokWait = null, timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
+export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], grokFiles = [], grokWait = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
@@ -653,13 +647,6 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
   });
 }
 
-function durationRows(items, labelKey) {
-  if (!items.length) return '<p class="hint">No time logged.</p>';
-  return `<table class="grid compact"><thead><tr><th>${labelKey === 'title' ? 'Task' : 'Name'}</th><th>Time</th></tr></thead><tbody>
-    ${items.map((item) => `<tr><td>${item.id && labelKey === 'title' ? `<a href="/tasks/${item.id}">${esc(item[labelKey])}</a>` : esc(item[labelKey])}</td><td>${esc(formatDuration(item.seconds))}</td></tr>`).join('')}
-  </tbody></table>`;
-}
-
 function manageHref(board, extra = {}) {
   const params = new URLSearchParams();
   params.set('period', String(extra.period || board.periodDays));
@@ -690,6 +677,25 @@ function manageCard(title, sub, inner) {
   return `<section class="sheet manage-block"><h2>${esc(title)}</h2><p class="card-sub">${esc(sub)}</p>${inner}</section>`;
 }
 
+function kpiSpark(series, color, zeroCounts = false) {
+  const present = (series || []).filter((value) => value != null);
+  const signal = zeroCounts ? present.length > 0 : present.some((value) => value > 0);
+  if (!signal) return '<span class="kpi-empty">Not enough data yet</span>';
+  return sparkline(present.map((value) => value || 0), color);
+}
+
+function flowSubtitle(cfd) {
+  const names = [
+    ['todo', 'To do'],
+    ['in_progress', 'In progress'],
+    ['review', 'Review'],
+    ['done', 'Done'],
+  ].filter(([key]) => (cfd?.[key] || []).some((value) => value > 0)).map(([, label]) => label);
+  if (names.length < 2) return 'A wide band means tasks are sitting in that status.';
+  const list = names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  return `How many tasks are in ${list} each day. A wide band means tasks are sitting there.`;
+}
+
 export function renderManage({ user, csrf, msg, board, projects }) {
   const k = board.kpis;
   const avgText = k.avg == null ? '—' : `${k.avg}d`;
@@ -715,10 +721,10 @@ export function renderManage({ user, csrf, msg, board, projects }) {
           <p class="manager-tip">${esc(board.managerTip)}</p>
         </section>
         <div class="kpi-row">
-          <div class="kpi"><div class="kpi-top"><span>Open</span>${sparkline(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral', board.periodDays)}</div>
-          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${sparkline(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad', board.periodDays)}</div>
-          <div class="kpi"><div class="kpi-top"><span>Done</span>${sparkline(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood', board.periodDays)}</div>
-          <div class="kpi"><div class="kpi-top"><span>Avg days to finish</span>${sparkline(k.sparkCycle, '#f97316')}</div><strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad', board.periodDays)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Open</span>${kpiSpark(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral', board.periodDays)}</div>
+          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${kpiSpark(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad', board.periodDays)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Done</span>${kpiSpark(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood', board.periodDays)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Avg days to finish</span>${k.avg == null ? '' : kpiSpark(k.sparkCycle, '#f97316', true)}</div>${k.avg == null ? '<p class="kpi-empty">Not enough data yet</p>' : `<strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad', board.periodDays)}`}</div>
         </div>
       </div>
     </section>
@@ -748,13 +754,13 @@ export function renderManage({ user, csrf, msg, board, projects }) {
     </section>
     <div class="manage-grid">
       ${manageCard('Created vs done', 'If created stays above done, work is piling up.', `<div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div>`)}
-      ${manageCard('Status over time', 'A wide band means tasks are sitting in that status.', `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
+      ${manageCard('Status over time', flowSubtitle(board.cfd), `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
       ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
       ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>
     ${manageCard('Workload', 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
     <div class="manage-grid">
-      ${manageCard('Needs attention', 'Late tasks, tasks stuck in review, and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue, stuck in review, or unassigned.</p>')}
+      ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
       ${manageCard('By project', 'Open, overdue, and finished tasks in this period.', `<div class="table-wrap"><table class="grid">
           <thead><tr><th>Project</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Done</th></tr></thead>
           <tbody>${board.projects.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.open}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.done}</td></tr>`).join('') || '<tr><td colspan="4">No project work in this period.</td></tr>'}</tbody>

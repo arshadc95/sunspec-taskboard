@@ -141,6 +141,9 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     const csvText = await csv.text();
     assert.match(csvText, /Tubecon logger/);
     assert.match(csvText, /yes/);
+    assert.doesNotMatch(csvText.split('\n')[0], /(^|,)time(,|$)/i);
+    assert.doesNotMatch(filtered.text, /<th>Time<\/th>/);
+    assert.doesNotMatch(detail.text, /<h2>Time<\/h2>/);
 
     const manageDenied = await page(base, lindi.cookies, '/manage');
     assert.equal(manageDenied.res.status, 403);
@@ -154,6 +157,7 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(manage.text, /Avg days to finish/);
     assert.match(manage.text, /If created stays above done/);
     assert.doesNotMatch(manage.text, /info-btn/);
+    assert.match(manage.text, /Not enough data yet/);
     assert.doesNotMatch(manageDenied.text, /href="\/manage"/);
     const again = await page(base, admin.cookies, '/users');
     await post(base, admin.cookies, '/users', { _csrf: again.csrf, name: 'Thabo Admin', email: 'thabo-admin@example.com', password: 'thabo-password', role: 'admin' });

@@ -3,7 +3,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { coachTips } from '../src/coach.js';
+import { coachTips, managerTip } from '../src/coach.js';
+import { stackedArea } from '../src/charts.js';
 import { createTask, openDatabase, updateTask } from '../src/db.js';
 
 test('coach stays constructive and waits for enough data', () => {
@@ -55,6 +56,33 @@ test('coach can say something kind when the week went well', () => {
     topFinisher: { name: 'Lindi', done: 4 },
   });
   assert.match(tips.map((item) => item.text).join(' '), /Nice, 5 tasks closed on time/);
+});
+
+test('an empty review band stays off the chart and out of the daily tip', () => {
+  const svg = stackedArea({
+    days: ['11-01', '11-02'],
+    todo: [2, 1],
+    in_progress: [0, 1],
+    review: [0, 0],
+    done: [0, 1],
+  });
+  assert.doesNotMatch(svg, /Review/);
+  assert.match(svg, /To do/);
+  assert.match(svg, /In progress/);
+  assert.match(svg, /Done/);
+  const shown = stackedArea({
+    days: ['11-01'],
+    todo: [0],
+    in_progress: [0],
+    review: [2],
+    done: [0],
+  });
+  assert.match(shown, /Review/);
+  for (let day = 1; day <= 40; day += 1) {
+    const when = new Date(Date.UTC(2026, 0, day));
+    assert.doesNotMatch(managerTip(when), /review/i);
+  }
+  assert.match(managerTip(new Date(Date.UTC(2026, 0, 4)), { review: true }), /review/i);
 });
 
 test('status changes are stored for the flow chart', () => {
