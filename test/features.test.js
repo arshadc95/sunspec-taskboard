@@ -147,6 +147,8 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(csvText, /yes/);
     assert.match(csvText.split('\n')[0], /(^|,)time(,|$)/i);
     assert.match(filtered.text, /<th>Time<\/th>/);
+    assert.doesNotMatch(filtered.text, /info-btn/);
+    assert.doesNotMatch(mentions.text, /info-btn/);
     assert.match(detail.text, /<h2>Time<\/h2>/);
 
     const manageDenied = await page(base, lindi.cookies, '/manage');
@@ -156,12 +158,10 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(manage.text, /Lindi Nkosi/);
     assert.match(manage.text, /Tubecon logger/);
     assert.match(manage.text, /Needs attention/);
-    assert.doesNotMatch(manage.text, />Tips</);
-    assert.doesNotMatch(manage.text, /Worth handing some off|Worth seeing who else|general reminder/);
-    assert.match(manage.text, /class="kpi-row"/);
+    assert.match(manage.text, /Tips/);
     assert.match(manage.text, /Created vs done/);
     assert.match(manage.text, /Avg days to finish/);
-    assert.doesNotMatch(manage.text, /If created stays above done|card-sub|wide band|piling up/);
+    assert.match(manage.text, /If created stays above done/);
     assert.doesNotMatch(manage.text, /info-btn/);
     assert.match(manage.text, /Not enough data yet/);
     assert.doesNotMatch(manageDenied.text, /href="\/manage"/);

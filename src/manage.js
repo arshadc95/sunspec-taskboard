@@ -1,5 +1,12 @@
 import { colorForUser } from './colors.js';
 import { dateInJohannesburg, shiftDate, todayDate } from './time.js';
+import { coachTips, managerTip } from './coach.js';
+
+function weekStartDate(ymd) {
+  const [year, month, day] = ymd.split('-').map(Number);
+  const dow = new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
+  return shiftDate(ymd, -((dow + 6) % 7));
+}
 
 function overlapSeconds(started, ended, fromMs, toMs) {
   const start = Date.parse(started);
@@ -84,7 +91,7 @@ function onTimeRate(tasks) {
   return Math.round((ok / withDue.length) * 100);
 }
 
-export function buildManage(db, { projectId = null, month = null, sort = 'name', dir = 'asc', now = new Date() } = {}) {
+export function buildManage(db, { projectId = null, month = null, sort = 'name', dir = 'asc', now = new Date(), viewerId = null } = {}) {
   const today = todayDate(now);
   const nowMs = now.getTime();
   const tasks = db.prepare(`
@@ -280,6 +287,20 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     return { name: project.name, open: open.length, overdue: open.filter((task) => task.due_date && task.due_date < today).length, done: done.length, seconds };
   }).filter((row) => row.open || row.overdue || row.done || row.seconds);
 
+  const reviewStuck = live.filter((task) => task.status === 'review').filter((task) => {
+    const rows = hist.get(task.id) || [];
+    const entered = [...rows].reverse().find((row) => row.status === 'review');
+    return nowMs - Date.parse(entered?.changed_at || task.created_at) > 3 * 86400000;
+  }).length;
+  const staleProgress = live.filter((task) => task.status === 'in_progress' && Date.parse(task.updated_at) < nowMs - 7 * 86400000).map((task) => ({
+    id: task.id,
+    title: task.title,
+    owner: names.get((assignees.get(task.id) || [])[0]) || 'someone',
+    days: Math.max(1, Math.floor((nowMs - Date.parse(task.updated_at)) / 86400000)),
+  }));
+  const weekStartMs = Date.parse(`${weekStartDate(today)}T00:00:00+02:00`);
+  const onTimeWeek = live.filter((task) => task.status === 'done' && task.due_date && task.completed_at && Date.parse(task.completed_at) >= weekStartMs && dateInJohannesburg(task.completed_at) <= task.due_date).length;
+  const finisher = [...personStats].sort((a, b) => b.done - a.done)[0];
   const monthRows = [];
   let monthCursor = today.slice(0, 7);
   for (let i = 0; i < 6; i += 1) {
@@ -332,6 +353,25 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     backlog,
     attention: attention.slice(0, 12),
     projects: projectRows,
+    tips: coachTips({
+      periodDays: Math.max(1, Math.ceil(spanMs / 86400000)),
+      historyDays: Math.max(1, Math.ceil(spanMs / 86400000)),
+      open: openNow.length,
+      viewerId,
+      people: personStats.map((person) => ({ ...person, open: person.assigned })),
+      reviewStuck,
+      staleProgress,
+      noDue: openNow.filter((task) => !task.due_date).length,
+      unassigned: openNow.filter((task) => !(assignees.get(task.id) || []).length).length,
+      unassignedNew: openNow.filter((task) => !(assignees.get(task.id) || []).length && Date.parse(task.created_at) >= periodStart).length,
+      donePeriod: donePeriod.length,
+      donePrevious: donePrev.length,
+      overdueNow: overdueNow.length,
+      overdueStart: openThen.filter((task) => task.due_date && task.due_date < todayDate(new Date(periodStart))).length,
+      onTimeWeek,
+      topFinisher: finisher && finisher.done >= 3 ? { name: finisher.name, done: finisher.done } : null,
+    }),
     hasReview: live.some((task) => task.status === 'review'),
+    managerTip: managerTip(now, { review: live.some((task) => task.status === 'review') }),
   };
 }

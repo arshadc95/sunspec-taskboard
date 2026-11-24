@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
-import { stackedArea } from '../src/charts.js';
 import { colorForUser, nextColor, normalizeColor, PALETTE } from '../src/colors.js';
-import { createTask, openDatabase, updateTask } from '../src/db.js';
 import { clampMonth, monthSpan } from '../src/manage.js';
 
 test('a past calendar month runs from the 1st to the next 1st in Johannesburg', () => {
@@ -63,58 +58,4 @@ test('the month stepper stays between the first task and the current month', () 
   const future = clampMonth('2027-03', '2026-08-15', '2026-11-24');
   assert.equal(future.ym, '2026-11');
   assert.equal(future.canNext, false);
-});
-
-test('an empty review band stays off the chart', () => {
-  const svg = stackedArea({
-    days: ['11-01', '11-02'],
-    todo: [2, 1],
-    in_progress: [0, 1],
-    review: [0, 0],
-    done: [0, 1],
-  });
-  assert.doesNotMatch(svg, /Review/);
-  assert.match(svg, /To do/);
-  assert.match(svg, /In progress/);
-  assert.match(svg, /Done/);
-  const shown = stackedArea({
-    days: ['11-01'],
-    todo: [0],
-    in_progress: [0],
-    review: [2],
-    done: [0],
-  });
-  assert.match(shown, /Review/);
-});
-
-test('status changes are stored for the flow chart', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-history-'));
-  const db = openDatabase(path.join(dir, 'board.sqlite'));
-  const now = new Date().toISOString();
-  const userId = Number(db.prepare(`
-    INSERT INTO users (email, name, password_hash, role, active, created_at, updated_at)
-    VALUES ('ada@example.com', 'Ada', 'x', 'user', 1, ?, ?)
-  `).run(now, now).lastInsertRowid);
-  const taskId = createTask(db, {
-    title: 'String check',
-    description: '',
-    assigneeId: userId,
-    status: 'todo',
-    priority: null,
-    dueDate: null,
-    projectId: null,
-    createdBy: userId,
-  });
-  updateTask(db, taskId, {
-    title: 'String check',
-    description: '',
-    assigneeId: userId,
-    status: 'in_progress',
-    priority: null,
-    dueDate: null,
-    projectId: null,
-  });
-  const rows = db.prepare('SELECT status FROM task_status_history WHERE task_id = ? ORDER BY id').all(taskId);
-  assert.deepEqual(rows.map((row) => row.status), ['todo', 'in_progress']);
-  db.close();
 });

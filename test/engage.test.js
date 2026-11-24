@@ -151,9 +151,11 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     const calendar = await page(base, admin, '/calendar');
     assert.equal(calendar.res.status, 200);
     assert.match(calendar.text, /Site visit/);
+    assert.doesNotMatch(calendar.text, /info-btn/);
     const team = await page(base, admin, '/team');
     assert.match(team.text, /Thabang Madikgetla/);
     assert.match(team.text, /On time/);
+    assert.doesNotMatch(team.text, /info-btn/);
     const denied = await post(base, thabang, `/tasks/${taskId}/delete`, { _csrf: opened.csrf });
     assert.equal(denied.status, 403);
     const removed = await post(base, admin, `/tasks/${taskId}/delete`, { _csrf: users.csrf, back: '/' });

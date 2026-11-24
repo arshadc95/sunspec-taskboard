@@ -682,6 +682,7 @@ if (grokRoot) {
     waitingCount = (state.waiting || []).length;
   }
 
+  const pdfNote = grokRoot.querySelector('[data-grok-pdf-note]');
   function showPicked() {
     picked.innerHTML = '';
     chosen.forEach((file, index) => {
@@ -695,6 +696,7 @@ if (grokRoot) {
       chip.append(drop);
       picked.append(chip);
     });
+    if (pdfNote) pdfNote.hidden = chosen.length === 0;
   }
 
   async function load(id = threadId) {
