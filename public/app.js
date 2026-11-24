@@ -279,6 +279,110 @@ if (grokRoot) {
   let connected = true;
   let threadId = null;
   let chosen = [];
+  let waitingCount = 0;
+  let knownWaiting = null;
+  const unread = new Map();
+  const baseTitle = document.title;
+  const badge = grokRoot.querySelector('[data-grok-badge]');
+  const soundButton = grokRoot.querySelector('[data-grok-sound]');
+  if (localStorage.getItem('grok-sound') === '0') soundButton.setAttribute('aria-pressed', 'false');
+
+  function formatElapsed(since) {
+    const sec = Math.max(0, Math.floor((Date.now() - Number(since)) / 1000));
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  }
+
+  function tickElapsed() {
+    document.querySelectorAll('[data-grok-elapsed]').forEach((node) => {
+      if (node.dataset.since) node.textContent = formatElapsed(node.dataset.since);
+    });
+  }
+  window.setInterval(tickElapsed, 1000);
+
+  function renderBadge() {
+    const count = unread.size;
+    badge.hidden = count === 0;
+    badge.textContent = count > 9 ? '9+' : String(count);
+    document.title = count ? `(${count}) ${baseTitle}` : baseTitle;
+  }
+
+  function soundOn() {
+    return soundButton.getAttribute('aria-pressed') !== 'false';
+  }
+
+  function blip() {
+    if (!soundOn()) return;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 740;
+    gain.gain.value = 0.04;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    osc.stop(ctx.currentTime + 0.13);
+    window.setTimeout(() => ctx.close(), 400);
+  }
+
+  function lookingAt(id) {
+    return open && !document.hidden && threadId === id;
+  }
+
+  function seeThread(id) {
+    if (!open || document.hidden || Number(threadId) !== Number(id)) return;
+    for (const [messageId, owner] of [...unread]) {
+      if (Number(owner) === Number(id)) unread.delete(messageId);
+    }
+    renderBadge();
+  }
+
+  function clearUnread() {
+    unread.clear();
+    renderBadge();
+  }
+
+  function noteArrivals(waiting) {
+    const next = new Map((waiting || []).map((item) => [item.id, item.thread_id]));
+    if (knownWaiting) {
+      for (const [id, owner] of knownWaiting) {
+        if (!next.has(id) && !(open && !document.hidden && Number(threadId) === Number(owner))) {
+          unread.set(id, owner);
+          blip();
+        }
+      }
+      renderBadge();
+    }
+    knownWaiting = next;
+    seeThread(threadId);
+  }
+
+  function ackNode(since, live) {
+    const box = document.createElement('div');
+    box.className = 'grok-ack';
+    const line = document.createElement('p');
+    line.className = 'grok-ack-line';
+    line.append('Got it, working on it');
+    const dots = document.createElement('span');
+    dots.className = 'grok-dots';
+    dots.setAttribute('aria-hidden', 'true');
+    dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
+    line.append(dots);
+    const time = document.createElement('time');
+    time.dataset.grokElapsed = '';
+    time.dataset.since = String(since);
+    time.textContent = formatElapsed(since);
+    box.append(line, time);
+    if (live) {
+      const status = document.createElement('p');
+      status.className = 'grok-live';
+      status.textContent = live;
+      box.append(status);
+    }
+    return box;
+  }
 
   function fileNode(file) {
     const line = document.createElement('p');
@@ -306,6 +410,11 @@ if (grokRoot) {
       log.append(note);
     }
     (state.messages || []).forEach((message) => {
+      if (message.status === 'pending' && !message.body) {
+        log.append(ackNode(Date.parse(message.created_at) || Date.now(), message.live));
+        (message.files || []).forEach((file) => log.append(fileNode(file)));
+        return;
+      }
       if (message.body || (message.files || []).length) {
         if (message.body) {
           const line = document.createElement('p');
@@ -317,12 +426,6 @@ if (grokRoot) {
       }
     });
     (state.files || []).forEach((file) => log.append(fileNode(file)));
-    if (pending) {
-      const wait = document.createElement('p');
-      wait.className = 'grok-wait';
-      wait.textContent = 'Grok is thinking…';
-      log.append(wait);
-    }
     log.scrollTop = log.scrollHeight;
     list.innerHTML = '';
     (state.threads || []).forEach((thread) => {
@@ -353,6 +456,8 @@ if (grokRoot) {
       empty.textContent = 'No chats yet.';
       list.append(empty);
     }
+    noteArrivals(state.waiting || []);
+    waitingCount = (state.waiting || []).length;
   }
 
   function showPicked() {
@@ -379,7 +484,7 @@ if (grokRoot) {
   function watch() {
     window.clearInterval(timer);
     timer = 0;
-    if (!open || !pending) return;
+    if (!waitingCount) return;
     timer = window.setInterval(() => { load().catch(() => {}); }, 3000);
   }
 
@@ -422,7 +527,8 @@ if (grokRoot) {
   bubble.addEventListener('click', () => {
     open = true;
     panel.hidden = false;
-    load().then(watch).catch(() => {});
+    clearUnread();
+    load().then(() => { seeThread(threadId); watch(); }).catch(() => {});
   });
   grokRoot.querySelector('[data-grok-close]').addEventListener('click', () => {
     open = false;
@@ -462,9 +568,11 @@ if (grokRoot) {
       mine.textContent = text;
       log.append(mine);
     }
-    const wait = document.createElement('p');
-    wait.className = 'grok-wait';
-    wait.textContent = connected ? 'Grok is thinking…' : "Grok isn't connected yet";
+    const wait = connected ? ackNode(Date.now(), '') : document.createElement('p');
+    if (!connected) {
+      wait.className = 'grok-note';
+      wait.textContent = "Grok isn't connected yet";
+    }
     log.append(wait);
     log.scrollTop = log.scrollHeight;
     const body = new FormData();
@@ -482,6 +590,28 @@ if (grokRoot) {
     paint(payload);
     watch();
   });
+  soundButton.addEventListener('click', () => {
+    const on = soundButton.getAttribute('aria-pressed') === 'false';
+    soundButton.setAttribute('aria-pressed', on ? 'true' : 'false');
+    localStorage.setItem('grok-sound', on ? '1' : '0');
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) seeThread(threadId); });
+  load().then(watch).catch(() => {});
+}
+
+const taskWait = document.querySelector('[data-grok-task]');
+if (taskWait) {
+  const taskId = taskWait.dataset.grokTask;
+  const live = taskWait.querySelector('[data-grok-live]');
+  let wasWaiting = true;
+  window.setInterval(async () => {
+    const response = await fetch(`/api/grok/tasks/${taskId}`, { headers: { accept: 'application/json' } });
+    if (!response.ok) return;
+    const state = await response.json();
+    if (live) live.textContent = state.live || '';
+    if (wasWaiting && !state.waiting) window.location.reload();
+    wasWaiting = Boolean(state.waiting);
+  }, 3000);
 }
 
 if (new URLSearchParams(location.search).get('toast') === 'done' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

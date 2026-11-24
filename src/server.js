@@ -61,9 +61,12 @@ import {
   listGrokFiles,
   listGrokMessages,
   listGrokThreads,
+  listGrokWaiting,
   nameGrokThreadFromMessage,
   recordGrokRequest,
   renameGrokThread,
+  taskGrokLive,
+  unansweredGrokMention,
   getRunningTimer,
   markMentionsRead,
   myDay,
@@ -528,6 +531,7 @@ export function createApp(config) {
       filesByComment.get(key).push(fileExpiry(file));
     }
     for (const comment of comments) comment.files = filesByComment.get(comment.id) || [];
+    const grokWaitMention = unansweredGrokMention(db, task.id, grokUser.id);
     const commentPerms = new Map(comments.map((comment) => [comment.id, canDeleteComment(req.user, comment)]));
     const commentKudos = kudosSummary(db, req.user.id, 'comment', comments.map((comment) => comment.id));
     const taskKudos = kudosSummary(db, req.user.id, 'task', [task.id]);
@@ -538,6 +542,7 @@ export function createApp(config) {
       task,
       comments,
       grokFiles: filesByComment.get(0) || [],
+      grokWait: grokWaitMention ? { since: grokWaitMention.created_at, live: taskGrokLive(db, task.id) } : null,
       users: assigneeChoices(db, task),
       projects: listProjects(db),
       activity: listActivity(db, task.id),
@@ -859,6 +864,18 @@ export function createApp(config) {
     res.sendFile(full);
   });
 
+  app.get('/api/grok/tasks/:id', requireUser, (req, res) => {
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    const mention = unansweredGrokMention(db, task.id, grokUser.id);
+    res.json({
+      waiting: Boolean(mention),
+      since: mention?.created_at || null,
+      live: taskGrokLive(db, task.id),
+    });
+  });
+
   app.get('/api/grok', requireUser, (req, res) => {
     const requested = /^\d+$/.test(String(req.query.thread || '')) ? Number(req.query.thread) : null;
     const state = grokState(req.user.id, requested);
@@ -945,6 +962,8 @@ export function createApp(config) {
       if (!thread) return null;
     } else thread = threads[0] || null;
     const messages = thread ? listGrokMessages(db, thread.id) : [];
+    const waiting = listGrokWaiting(db, userId);
+    const liveByRequest = new Map(waiting.map((row) => [row.request_id, row.live]));
     const grouped = new Map();
     const loose = [];
     for (const file of thread ? listGrokFiles(db, { threadId: thread.id }) : []) {
@@ -959,12 +978,15 @@ export function createApp(config) {
       thread_id: thread ? thread.id : null,
       title: thread?.title || '',
       pending: messages.some((row) => row.status === 'pending'),
+      waiting: waiting.map((row) => ({ id: row.id, thread_id: row.thread_id, created_at: row.created_at, live: row.live })),
       threads: threads.map((item) => ({ id: item.id, title: item.title, updated_at: item.updated_at })),
       messages: messages.map((row) => ({
         id: row.id,
         role: row.role,
         body: row.body,
         status: row.status,
+        created_at: row.created_at,
+        live: liveByRequest.get(row.request_id) || '',
         files: grouped.get(row.id) || [],
       })),
       files: loose,

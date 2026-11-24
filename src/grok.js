@@ -9,6 +9,7 @@ import {
   addComment,
   addGrokFile,
   bindLooseGrokCommentFiles,
+  clearGrokLiveForTask,
   completeGrokReply,
   countGrokRequests,
   createTask,
@@ -16,6 +17,7 @@ import {
   getGrokFile,
   getGrokThread,
   getProject,
+  setGrokLive,
   getTask,
   getUser,
   latestGrokCommentId,
@@ -366,8 +368,34 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
     bindLooseGrokCommentFiles(db, task.id, commentId);
     const ids = activeUserIds(db, mentionedUserIds(body, listActiveUsers(db)));
     setCommentMentions(db, commentId, ids.filter((id) => id !== grok.id));
+    clearGrokLiveForTask(db, task.id);
     addActivity(db, { taskId: task.id, actorId: grok.id, action: 'comment', detail: behalf(actor, 'Added a comment') });
     json(res, 201, { comment: { id: commentId, author: 'Grok', body } });
+  });
+
+  router.post('/chat/:threadId/status', (req, res) => {
+    const actor = actingUser(db, req, res);
+    if (!actor) return;
+    const thread = getGrokThread(db, Number(req.params.threadId));
+    if (!thread) return json(res, 404, { error: 'Thread not found' });
+    if (thread.user_id !== actor.id) return json(res, 403, { error: 'That person does not own this thread' });
+    const requestId = String(req.body.request_id || '').trim();
+    if (!requestId) return json(res, 400, { error: 'request_id is required' });
+    if (req.body.text === undefined) return json(res, 400, { error: 'text is required' });
+    const live = setGrokLive(db, { requestId, userId: actor.id, threadId: thread.id, text: req.body.text });
+    json(res, 200, { ok: true, text: live?.text || '' });
+  });
+
+  router.post('/tasks/:id/status', (req, res) => {
+    const actor = actingUser(db, req, res);
+    if (!actor) return;
+    const task = getTask(db, Number(req.params.id));
+    if (!task) return json(res, 404, { error: 'Task not found' });
+    const requestId = String(req.body.request_id || '').trim();
+    if (!requestId) return json(res, 400, { error: 'request_id is required' });
+    if (req.body.text === undefined) return json(res, 400, { error: 'text is required' });
+    const live = setGrokLive(db, { requestId, userId: actor.id, taskId: task.id, text: req.body.text });
+    json(res, 200, { ok: true, text: live?.text || '' });
   });
 
   router.post('/chat/:threadId/reply', (req, res) => {

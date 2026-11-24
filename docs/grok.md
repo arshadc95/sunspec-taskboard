@@ -70,6 +70,8 @@ PDFs are checked by the `%PDF` magic bytes, not the browser's file type. At most
 
 Reply to a chat with `POST /api/bot/chat/:thread_id/reply` and the same `request_id`. Reply to a comment with `POST /api/bot/tasks/:id/comments`.
 
+While a reply is still pending, `POST /api/bot/chat/:thread_id/status` or `POST /api/bot/tasks/:id/status` with `{acting_user_id, request_id, text}` sets a short line under the "Got it, working on it…" indicator (`Reading the board…`, `Creating task…`). `text` is at most 160 characters. An empty `text` clears the line. The line is also cleared when the chat reply or the Grok comment lands. The board keeps polling every 3 seconds while any chat reply is pending, even if the panel is closed.
+
 ## Bot API
 
 Base path `/api/bot`. Header `Authorization: Bearer <BOT_API_TOKEN>`.
@@ -100,6 +102,14 @@ curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'content-type: application
 curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"acting_user_id":4,"body":"The fan is on order."}' \
   "$BASE/api/bot/tasks/18/comments"
+
+curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"acting_user_id":4,"request_id":"ab12cd34ef56ab12cd34ef56","text":"Reading the board…"}' \
+  "$BASE/api/bot/chat/4/status"
+
+curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"acting_user_id":4,"request_id":"ab12cd34ef56ab12cd34ef56","text":"Creating task…"}' \
+  "$BASE/api/bot/tasks/18/status"
 
 curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"acting_user_id":4,"request_id":"ab12cd34ef56ab12cd34ef56","text":"Two tasks are due today."}' \

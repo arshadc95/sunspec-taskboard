@@ -154,6 +154,21 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     assert.equal(received[0].body.recent_context.at(-1).text, 'What is due today?');
 
     const arshadId = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
+    const status = await fetch(`${base}/api/bot/chat/${chat.thread_id}/status`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshadId, request_id: received[0].body.request_id, text: 'Reading the board…' }),
+    });
+    assert.equal(status.status, 200);
+    const live = await (await fetch(`${base}/api/grok?thread=${chat.thread_id}`, { headers: { cookie: admin.header(), accept: 'application/json' } })).json();
+    assert.equal(live.messages.at(-1).live, 'Reading the board…');
+    assert.equal(live.waiting.length, 1);
+    const stranger = await fetch(`${base}/api/bot/chat/${chat.thread_id}/status`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: 99999, request_id: received[0].body.request_id, text: 'Nope' }),
+    });
+    assert.equal(stranger.status, 403);
     const reply = await fetch(`${base}/api/bot/chat/${chat.thread_id}/reply`, {
       method: 'POST',
       headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
@@ -163,7 +178,9 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     const polled = await fetch(`${base}/api/grok`, { headers: { cookie: admin.header(), accept: 'application/json' } });
     const after = await polled.json();
     assert.equal(after.pending, false);
+    assert.equal(after.waiting.length, 0);
     assert.equal(after.messages.at(-1).body, 'Nothing is due today.');
+    assert.equal(after.messages.at(-1).live, '');
 
     const unauth = await fetch(`${base}/api/bot/tasks`);
     assert.equal(unauth.status, 401);
@@ -193,6 +210,18 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     assert.equal(hits[1].body.task.title, 'Replace the inverter fan');
     assert.equal(hits[1].body.user.name, 'Lindi Nkosi');
     assert.equal(hits[1].body.thread_id, undefined);
+    const taskStatus = await fetch(`${base}/api/bot/tasks/${taskId}/status`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: lindiId, request_id: hits[1].body.request_id, text: 'Creating task…' }),
+    });
+    assert.equal(taskStatus.status, 200);
+    const waitingPage = await page(base, lindi, `/tasks/${taskId}`);
+    assert.match(waitingPage.text, /Got it, working on it/);
+    assert.match(waitingPage.text, /Creating task/);
+    const taskLive = await (await fetch(`${base}/api/grok/tasks/${taskId}`, { headers: { cookie: lindi.header(), accept: 'application/json' } })).json();
+    assert.equal(taskLive.waiting, true);
+    assert.equal(taskLive.live, 'Creating task…');
 
     const comment = await fetch(`${base}/api/bot/tasks/${taskId}/comments`, {
       method: 'POST',
@@ -202,6 +231,10 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     assert.equal(comment.status, 201);
     const shown = await page(base, lindi, `/tasks/${taskId}`);
     assert.match(shown.text, /Looking now\./);
+    assert.equal(shown.text.includes('data-grok-task'), false);
+    const cleared = await (await fetch(`${base}/api/grok/tasks/${taskId}`, { headers: { cookie: lindi.header(), accept: 'application/json' } })).json();
+    assert.equal(cleared.waiting, false);
+    assert.equal(cleared.live, '');
     assert.match(shown.text, />Grok</);
     const activity = db.prepare('SELECT detail FROM activity WHERE task_id = ? ORDER BY id DESC').get(taskId);
     assert.match(activity.detail, /Grok \(on behalf of Lindi Nkosi\)/);

@@ -128,11 +128,13 @@ function grokWidget(user, csrf) {
   return `<div class="grok" data-grok data-csrf="${esc(csrf)}">
     <button type="button" class="grok-bubble" aria-label="Open Grok" title="Grok">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4 L8 20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg>
+      <span class="grok-badge" data-grok-badge hidden>1</span>
     </button>
     <section class="grok-panel" hidden>
       <header class="grok-head">
         <button type="button" data-grok-chats>Chats</button>
         <strong>Grok</strong>
+        <button type="button" data-grok-sound aria-pressed="true">Sound</button>
         <button type="button" data-grok-new>+ New chat</button>
         <button type="button" data-grok-close aria-label="Close">×</button>
       </header>
@@ -536,7 +538,7 @@ function kudosButton({ csrf, type, id, count = 0, mine = false, back }) {
   </form>`;
 }
 
-export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], grokFiles = [], timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
+export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], grokFiles = [], grokWait = null, timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
@@ -569,6 +571,11 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
           </article>
         `).join('') : '<p class="hint">No comments yet.</p>'}
         ${fileLinks(grokFiles)}
+        ${grokWait ? `<div class="grok-ack" data-grok-task="${task.id}" data-since="${Date.parse(grokWait.since) || ''}">
+          <p class="grok-ack-line">Got it, working on it<span class="grok-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
+          <time data-grok-elapsed data-since="${Date.parse(grokWait.since) || ''}"></time>
+          <p class="grok-live" data-grok-live>${esc(grokWait.live || '')}</p>
+        </div>` : ''}
         <form class="stack" method="post" action="/tasks/${task.id}/comments" enctype="multipart/form-data">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <label class="field"><span>Add a comment</span>

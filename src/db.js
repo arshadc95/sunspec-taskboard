@@ -180,6 +180,16 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_grok_files_task ON grok_files(task_id);
     CREATE INDEX IF NOT EXISTS idx_grok_files_expires ON grok_files(expires_at);
 
+    CREATE TABLE IF NOT EXISTS grok_live (
+      id INTEGER PRIMARY KEY,
+      request_id TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL,
+      thread_id INTEGER,
+      task_id INTEGER,
+      text TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS kudos (
       id INTEGER PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1131,6 +1141,7 @@ export function completeGrokReply(db, threadId, { requestId, text }) {
     messageId = addGrokMessage(db, { threadId, role: 'grok', body: text, requestId, status: 'complete' });
   }
   db.prepare("UPDATE grok_files SET message_id = ? WHERE thread_id = ? AND kind = 'out' AND message_id IS NULL").run(messageId, threadId);
+  if (requestId) db.prepare('DELETE FROM grok_live WHERE request_id = ?').run(requestId);
   db.prepare('UPDATE grok_threads SET updated_at = ? WHERE id = ?').run(now, threadId);
   return messageId;
 }
@@ -1202,4 +1213,59 @@ export function listExpiredGrokFiles(db, nowIso) {
 
 export function deleteGrokFileRow(db, id) {
   db.prepare('DELETE FROM grok_files WHERE id = ?').run(id);
+}
+
+export function setGrokLive(db, { requestId, userId, threadId = null, taskId = null, text }) {
+  const clean = String(text || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+  if (!requestId) return null;
+  if (!clean) {
+    db.prepare('DELETE FROM grok_live WHERE request_id = ?').run(requestId);
+    return null;
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO grok_live (request_id, user_id, thread_id, task_id, text, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(request_id) DO UPDATE SET
+      text = excluded.text,
+      updated_at = excluded.updated_at,
+      user_id = excluded.user_id,
+      thread_id = excluded.thread_id,
+      task_id = excluded.task_id
+  `).run(requestId, userId, threadId, taskId, clean, now);
+  return { request_id: requestId, text: clean };
+}
+
+export function clearGrokLiveForTask(db, taskId) {
+  db.prepare('DELETE FROM grok_live WHERE task_id = ?').run(taskId);
+}
+
+export function listGrokWaiting(db, userId) {
+  return db.prepare(`
+    SELECT m.id, m.thread_id, m.request_id, m.created_at, COALESCE(l.text, '') AS live
+    FROM grok_messages m
+    JOIN grok_threads t ON t.id = m.thread_id
+    LEFT JOIN grok_live l ON l.request_id = m.request_id
+    WHERE t.user_id = ? AND m.role = 'grok' AND m.status = 'pending'
+    ORDER BY m.id
+  `).all(userId);
+}
+
+export function taskGrokLive(db, taskId) {
+  return db.prepare('SELECT text FROM grok_live WHERE task_id = ? ORDER BY updated_at DESC LIMIT 1').get(taskId)?.text || '';
+}
+
+export function unansweredGrokMention(db, taskId, grokUserId) {
+  const mention = db.prepare(`
+    SELECT c.id, c.created_at, c.author_id
+    FROM comments c
+    JOIN comment_mentions m ON m.comment_id = c.id AND m.user_id = ?
+    WHERE c.task_id = ?
+    ORDER BY c.id DESC
+    LIMIT 1
+  `).get(grokUserId, taskId);
+  if (!mention || mention.author_id === grokUserId) return null;
+  const later = db.prepare('SELECT id FROM comments WHERE task_id = ? AND author_id = ? AND id > ? LIMIT 1').get(taskId, grokUserId, mention.id);
+  if (later) return null;
+  return mention;
 }
