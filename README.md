@@ -100,6 +100,7 @@ The database is SQLite in WAL mode. Copying the file with `cp` while the app is 
 
 ```cron
 15 2 * * * mkdir -p /opt/sunspec-taskboard/data/backups && sqlite3 /opt/sunspec-taskboard/data/taskboard.sqlite ".backup /opt/sunspec-taskboard/data/backups/taskboard-$(date +\%F).sqlite"
+20 2 * * * tar -C /opt/sunspec-taskboard/data -czf /opt/sunspec-taskboard/data/backups/uploads-$(date +\%F).tar.gz uploads
 ```
 
 ## Run it on a laptop
@@ -127,3 +128,5 @@ Everyone who can sign in sees the same board and can create tasks, assign them, 
 Passwords are hashed with bcrypt. Session cookies are `HttpOnly` and `SameSite=Strict`. Failed logins are limited to 8 attempts per IP per 15 minutes.
 
 Due dates are calendar dates in Africa/Johannesburg. A task is overdue when its due date is before today and it is not Done. The board is grouped by status and sorted by due date.
+
+A task can belong to a project (type a new name such as Tubecon on the task form) and a priority of Low, Med, High, or Urgent. Filter the board by project. Comments can mention a person with `@Their Name`; the Mentions filter lists tasks where you were mentioned. Status, assignee, and due-date changes are kept on the task. Files up to 10 MB are stored in `DATA_DIR/uploads` and can only be downloaded by someone who is signed in. CSV downloads the tasks that match the current filters. Manage, for superusers and admins, shows open, overdue, and completed work per person. On a narrow screen the task table becomes cards and the orange bar along the bottom replaces the sidebar.

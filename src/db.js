@@ -67,7 +67,46 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_login_ip ON login_attempts(ip, created_at);
+
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS activity (
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL REFERENCES users(id),
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS comment_mentions (
+      comment_id INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      PRIMARY KEY (comment_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      uploaded_by INTEGER NOT NULL REFERENCES users(id),
+      stored_name TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      mime TEXT,
+      size INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_activity_task ON activity(task_id);
+    CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id);
   `);
+  const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
+  if (!taskColumns.some((column) => column.name === 'project_id')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id)');
+  }
 }
 
 export function userCount(db) {
@@ -225,19 +264,33 @@ export function listTasks(db, filters) {
     where.push("t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ?");
     params.push(filters.today);
   }
+  if (filters.projectId) {
+    where.push('t.project_id = ?');
+    params.push(filters.projectId);
+  }
+  if (filters.mentionUserId) {
+    where.push(`EXISTS (
+      SELECT 1 FROM comments cm
+      JOIN comment_mentions mn ON mn.comment_id = cm.id
+      WHERE cm.task_id = t.id AND mn.user_id = ?
+    )`);
+    params.push(filters.mentionUserId);
+  }
   if (filters.search) {
-    where.push("(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')");
+    where.push("(t.title LIKE ? ESCAPE '\\' OR IFNULL(t.description, '') LIKE ? ESCAPE '\\' OR IFNULL(p.name, '') LIKE ? ESCAPE '\\')");
     const term = likeTerm(filters.search);
-    params.push(term, term);
+    params.push(term, term, term);
   }
   const sql = `
     SELECT t.*,
       a.name AS assignee_name,
       c.name AS creator_name,
+      p.name AS project_name,
       (SELECT COUNT(*) FROM comments cm WHERE cm.task_id = t.id) AS comment_count
     FROM tasks t
     LEFT JOIN users a ON a.id = t.assignee_id
     LEFT JOIN users c ON c.id = t.created_by
+    LEFT JOIN projects p ON p.id = t.project_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY
       CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,
@@ -262,10 +315,12 @@ export function getTask(db, id) {
     SELECT t.*,
       a.name AS assignee_name,
       c.name AS creator_name,
+      p.name AS project_name,
       (SELECT COUNT(*) FROM comments cm WHERE cm.task_id = t.id) AS comment_count
     FROM tasks t
     LEFT JOIN users a ON a.id = t.assignee_id
     LEFT JOIN users c ON c.id = t.created_by
+    LEFT JOIN projects p ON p.id = t.project_id
     WHERE t.id = ?
   `).get(id) || null;
 }
@@ -275,9 +330,9 @@ export function createTask(db, fields) {
   const completedAt = fields.status === 'done' ? now : null;
   const info = db.prepare(`
     INSERT INTO tasks (
-      title, description, assignee_id, status, priority, due_date, created_by,
+      title, description, assignee_id, status, priority, due_date, project_id, created_by,
       completed_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     fields.title,
     fields.description,
@@ -285,6 +340,7 @@ export function createTask(db, fields) {
     fields.status,
     fields.priority,
     fields.dueDate,
+    fields.projectId || null,
     fields.createdBy,
     completedAt,
     now,
@@ -303,7 +359,7 @@ export function updateTask(db, id, fields) {
   db.prepare(`
     UPDATE tasks
     SET title = ?, description = ?, assignee_id = ?, status = ?, priority = ?, due_date = ?,
-        completed_at = ?, updated_at = ?
+        project_id = ?, completed_at = ?, updated_at = ?
     WHERE id = ?
   `).run(
     fields.title,
@@ -312,6 +368,7 @@ export function updateTask(db, id, fields) {
     fields.status,
     fields.priority,
     fields.dueDate,
+    fields.projectId || null,
     completedAt,
     now,
     id,
@@ -353,7 +410,178 @@ export function addComment(db, { taskId, authorId, body }) {
 export function deleteComment(db, id) {
   const comment = getComment(db, id);
   if (!comment) return null;
+  db.prepare('DELETE FROM comment_mentions WHERE comment_id = ?').run(id);
   db.prepare('DELETE FROM comments WHERE id = ?').run(id);
   db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), comment.task_id);
   return comment;
+}
+
+export function listProjects(db) {
+  return db.prepare('SELECT id, name FROM projects ORDER BY name COLLATE NOCASE').all();
+}
+
+export function getProject(db, id) {
+  return db.prepare('SELECT id, name FROM projects WHERE id = ?').get(id) || null;
+}
+
+export function findOrCreateProject(db, name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed || trimmed.length > 80) return null;
+  const existing = db.prepare('SELECT id FROM projects WHERE lower(name) = lower(?)').get(trimmed);
+  if (existing) return existing.id;
+  try {
+    const info = db.prepare('INSERT INTO projects (name, created_at) VALUES (?, ?)').run(trimmed, new Date().toISOString());
+    return Number(info.lastInsertRowid);
+  } catch (error) {
+    if (String(error.message).includes('UNIQUE')) {
+      return db.prepare('SELECT id FROM projects WHERE lower(name) = lower(?)').get(trimmed)?.id || null;
+    }
+    throw error;
+  }
+}
+
+export function addActivity(db, { taskId, actorId, action, detail }) {
+  db.prepare(`
+    INSERT INTO activity (task_id, actor_id, action, detail, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(taskId, actorId, action, detail, new Date().toISOString());
+}
+
+export function listActivity(db, taskId) {
+  return db.prepare(`
+    SELECT a.*, u.name AS actor_name
+    FROM activity a
+    JOIN users u ON u.id = a.actor_id
+    WHERE a.task_id = ?
+    ORDER BY a.created_at DESC, a.id DESC
+  `).all(taskId);
+}
+
+export function setCommentMentions(db, commentId, userIds) {
+  const insert = db.prepare('INSERT OR IGNORE INTO comment_mentions (comment_id, user_id) VALUES (?, ?)');
+  const tx = db.transaction((ids) => {
+    for (const userId of ids) insert.run(commentId, userId);
+  });
+  tx(userIds);
+}
+
+export function listAttachments(db, taskId) {
+  return db.prepare(`
+    SELECT a.*, u.name AS uploader_name
+    FROM attachments a
+    JOIN users u ON u.id = a.uploaded_by
+    WHERE a.task_id = ?
+    ORDER BY a.created_at ASC, a.id ASC
+  `).all(taskId);
+}
+
+export function getAttachment(db, id) {
+  return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) || null;
+}
+
+export function addAttachment(db, fields) {
+  const now = new Date().toISOString();
+  const info = db.prepare(`
+    INSERT INTO attachments (task_id, uploaded_by, stored_name, original_name, mime, size, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(fields.taskId, fields.uploadedBy, fields.storedName, fields.originalName, fields.mime || '', fields.size, now);
+  db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(now, fields.taskId);
+  return Number(info.lastInsertRowid);
+}
+
+export function deleteAttachment(db, id) {
+  const row = getAttachment(db, id);
+  if (!row) return null;
+  db.prepare('DELETE FROM attachments WHERE id = ?').run(id);
+  return row;
+}
+
+function taskScope(filters, params) {
+  const where = ['1 = 1'];
+  if (filters.projectId) {
+    where.push('t.project_id = ?');
+    params.push(filters.projectId);
+  }
+  if (filters.personId === 'none') where.push('t.assignee_id IS NULL');
+  else if (filters.personId) {
+    where.push('t.assignee_id = ?');
+    params.push(filters.personId);
+  }
+  return where.join(' AND ');
+}
+
+export function managementReport(db, filters) {
+  const peopleParams = [filters.today, filters.weekStart, filters.projectId, filters.projectId];
+  let personClause = '';
+  if (filters.personId && filters.personId !== 'none') {
+    personClause = 'AND u.id = ?';
+    peopleParams.push(filters.personId);
+  }
+  const people = filters.personId === 'none' ? [] : db.prepare(`
+    SELECT u.id, u.name,
+      SUM(CASE WHEN t.id IS NOT NULL AND t.status != 'done' THEN 1 ELSE 0 END) AS open_count,
+      SUM(CASE WHEN t.id IS NOT NULL AND t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
+      SUM(CASE WHEN t.completed_at IS NOT NULL AND t.completed_at >= ? THEN 1 ELSE 0 END) AS done_week
+    FROM users u
+    LEFT JOIN tasks t ON t.assignee_id = u.id AND (? IS NULL OR t.project_id = ?)
+    WHERE u.active = 1 ${personClause}
+    GROUP BY u.id
+    ORDER BY open_count DESC, u.name COLLATE NOCASE
+  `).all(...peopleParams);
+
+  const overdueParams = [];
+  const overdueWhere = taskScope(filters, overdueParams);
+  overdueParams.unshift(filters.today);
+  const overdue = db.prepare(`
+    SELECT t.id, t.title, t.due_date, t.status, a.name AS assignee_name, p.name AS project_name
+    FROM tasks t
+    LEFT JOIN users a ON a.id = t.assignee_id
+    LEFT JOIN projects p ON p.id = t.project_id
+    WHERE t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ?
+      AND ${overdueWhere}
+    ORDER BY t.due_date ASC
+    LIMIT 40
+  `).all(...overdueParams);
+
+  function doneSince(since) {
+    const params = [];
+    const where = taskScope(filters, params);
+    return db.prepare(`
+      SELECT t.id, t.title, t.completed_at, a.name AS assignee_name, p.name AS project_name
+      FROM tasks t
+      LEFT JOIN users a ON a.id = t.assignee_id
+      LEFT JOIN projects p ON p.id = t.project_id
+      WHERE t.status = 'done' AND t.completed_at IS NOT NULL AND t.completed_at >= ?
+        AND ${where}
+      ORDER BY t.completed_at DESC
+      LIMIT 20
+    `).all(since, ...params);
+  }
+
+  const totalParams = [];
+  const totalWhere = taskScope(filters, totalParams);
+  const totals = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open_count,
+      SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
+      SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_week,
+      SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_7,
+      SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_30
+    FROM tasks t
+    WHERE ${totalWhere}
+  `).get(filters.today, filters.weekStart, filters.since7, filters.since30, ...totalParams);
+
+  return {
+    people,
+    overdue,
+    done7: doneSince(filters.since7),
+    done30: doneSince(filters.since30),
+    totals: {
+      open: totals.open_count || 0,
+      overdue: totals.overdue_count || 0,
+      doneWeek: totals.done_week || 0,
+      done7: totals.done_7 || 0,
+      done30: totals.done_30 || 0,
+    },
+  };
 }

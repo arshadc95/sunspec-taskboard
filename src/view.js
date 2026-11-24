@@ -1,14 +1,16 @@
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { formatDateTime, formatDue, isOverdue } from './time.js';
+import { daysBetween, formatDateTime, formatDue, isOverdue } from './time.js';
 
 const ICONS = {
   tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   logout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  at: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 12v1a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16v-5M12 16V8M16 16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
-const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short']);
+const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig']);
 
 export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -22,6 +24,28 @@ export function esc(value) {
 
 function textBlock(value) {
   return esc(value).replace(/\n/g, '<br>');
+}
+
+function highlightMentions(body, users) {
+  let text = esc(body);
+  const sorted = [...(users || [])].sort((a, b) => String(b.name || '').length - String(a.name || '').length);
+  const replacements = [];
+  let tokenId = 0;
+  for (const user of sorted) {
+    const label = esc(user.name);
+    for (const raw of [user.name, user.email]) {
+      const needle = esc(raw || '');
+      if (!needle) continue;
+      const pattern = new RegExp(`@${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+      if (!pattern.test(text)) continue;
+      pattern.lastIndex = 0;
+      const token = `\u0000${tokenId++}\u0000`;
+      text = text.replace(pattern, token);
+      replacements.push([token, `<span class="mention">@${label}</span>`]);
+    }
+  }
+  for (const [token, html] of replacements) text = text.split(token).join(html);
+  return text.replace(/\n/g, '<br>');
 }
 
 function doc(title, bodyClass, body) {
@@ -59,6 +83,7 @@ function banner(msg) {
     email: 'That email is already in use.',
     lastsuper: 'The last active superuser cannot be demoted or deactivated.',
     short: 'Passwords must be at least 8 characters.',
+    toobig: 'That file is larger than 10 MB.',
   }[msg];
   if (!text) return '';
   return `<div class="banner ${BAD_MSGS.has(msg) ? 'bad' : 'ok'}">${esc(text)}</div>`;
@@ -90,6 +115,8 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg }) {
   <aside class="sidebar">
     <nav class="nav">
       ${navLink('/', 'tasks', 'Tasks', active)}
+      ${navLink('/?mentions=1', 'at', 'Mentions', active)}
+      ${staff ? navLink('/manage', 'chart', 'Manage', active) : ''}
       ${staff ? navLink('/users', 'users', 'Users', active) : ''}
     </nav>
     <form method="post" action="/logout" class="logout-form">
@@ -108,7 +135,13 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg }) {
       <p class="tz">Times shown in Africa/Johannesburg.</p>
     </div>
   </div>
-</div>`);
+</div>
+<nav class="bottom-nav">
+  <a class="${active === 'tasks' ? 'active' : ''}" href="/">Tasks</a>
+  <a class="${active === 'at' ? 'active' : ''}" href="/?mentions=1">Mentions</a>
+  ${staff ? `<a class="${active === 'chart' ? 'active' : ''}" href="/manage">Manage</a>` : ''}
+  ${staff ? `<a class="${active === 'users' ? 'active' : ''}" href="/users">Users</a>` : ''}
+</nav>`);
 }
 
 export function renderLogin({ msg, next, csrf }) {
@@ -145,9 +178,10 @@ function options(pairs, selected, blank) {
   return html.join('');
 }
 
-function taskForm({ task, users, csrf, canEdit }) {
+function taskForm({ task, users, projects, csrf, canEdit }) {
   const value = task || {};
   const assigneePairs = users.map((user) => [user.id, user.active ? user.name : `${user.name} (inactive)`]);
+  const projectPairs = (projects || []).map((project) => [project.id, project.name]);
   const fields = `
     <input type="hidden" name="_csrf" value="${esc(csrf)}">
     <label class="field"><span>Title</span>
@@ -157,6 +191,14 @@ function taskForm({ task, users, csrf, canEdit }) {
       <textarea name="description" rows="5" maxlength="20000" ${canEdit ? '' : 'disabled'}>${esc(value.description || '')}</textarea>
     </label>
     <div class="form-grid">
+      <label class="field"><span>Project</span>
+        <select name="project_id" ${canEdit ? '' : 'disabled'}>
+          ${options(projectPairs, value.project_id ?? '', 'No project')}
+        </select>
+      </label>
+      <label class="field"><span>Or new project</span>
+        <input name="new_project" maxlength="80" placeholder="Tubecon" ${canEdit ? '' : 'disabled'}>
+      </label>
       <label class="field"><span>Assignee</span>
         <select name="assignee_id" ${canEdit ? '' : 'disabled'}>
           ${options(assigneePairs, value.assignee_id ?? '', 'Unassigned')}
@@ -183,24 +225,40 @@ function taskForm({ task, users, csrf, canEdit }) {
   return `<form class="stack" method="post" action="${action}">${fields}</form>`;
 }
 
-export function renderBoard({ user, csrf, msg, tasks, filters, users, counts, today }) {
+function taskCard(task, today) {
+  const overdue = isOverdue(task.due_date, task.status, today);
+  return `<article class="task-card${overdue ? ' overdue' : ''}">
+    <a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>
+    <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
+    <div class="card-row">
+      <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
+      <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
+      <span class="due">${esc(formatDue(task.due_date))}</span>
+    </div>
+    <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
+  </article>`;
+}
+
+export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, counts, today, exportQuery }) {
   const groups = STATUSES.map(([status, label]) => ({
     status,
     label,
     rows: tasks.filter((task) => task.status === status),
   })).filter((group) => group.rows.length);
+  const cards = tasks.map((task) => taskCard(task, today)).join('');
   const table = groups.length
-    ? `<div class="table-wrap"><table class="grid">
+    ? `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
-          <th>Task</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Comments</th><th>Updated</th>
+          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Comments</th><th>Updated</th>
         </tr></thead>
         <tbody>
           ${groups.map((group) => `
-            <tr class="group"><td colspan="7">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
+            <tr class="group"><td colspan="8">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
             ${group.rows.map((task) => {
               const overdue = isOverdue(task.due_date, task.status, today);
               return `<tr class="${overdue ? 'overdue' : ''}">
                 <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
+                <td>${esc(task.project_name || '—')}</td>
                 <td>${esc(task.assignee_name || '—')}</td>
                 <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
                 <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
@@ -211,7 +269,8 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, counts, to
             }).join('')}
           `).join('')}
         </tbody>
-      </table></div>`
+      </table></div>
+      <div class="cards">${cards}</div>`
     : '<div class="panel empty">No tasks match these filters.</div>';
 
   const assigneeOptions = [
@@ -230,11 +289,16 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, counts, to
         <select name="assignee">${options(assigneeOptions, selectedAssignee)}</select>
       </label>
       <label class="check"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}> My tasks</label>
+      <label class="field"><span>Project</span>
+        <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
+      </label>
       <label class="check"><input type="checkbox" name="overdue" value="1"${filters.overdue ? ' checked' : ''}> Overdue only</label>
+      <label class="check"><input type="checkbox" name="mentions" value="1"${filters.mentions ? ' checked' : ''}> Mentions</label>
       <label class="field search"><span>Search</span>
         <input type="search" name="q" value="${esc(filters.search || '')}" placeholder="Search tasks…">
       </label>
       <button class="btn" type="submit">Apply</button>
+      <a class="btn" href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
       <a class="btn" href="/">Clear</a>
     </form>
     <p class="sort-note">Sorted by due date. Overdue tasks (due before today and not Done) are highlighted.</p>
@@ -245,14 +309,14 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, counts, to
     user,
     csrf,
     msg,
-    active: 'tasks',
+    active: filters.mentions ? 'at' : 'tasks',
     crumb: `<span>Tasks</span> <span class="count-pill">${counts.open}</span> <span class="crumb-meta">${counts.overdue} overdue</span>`,
     actions: '<a class="btn-on-orange" href="/tasks/new">New task</a>',
     body,
   });
 }
 
-export function renderTask({ user, csrf, msg, task, comments, users, canEdit, canDelete, commentPerms }) {
+export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], canEdit, canDelete, commentPerms }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
@@ -271,7 +335,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, canEdit, ca
         ${comments.length ? comments.map((comment) => `
           <article class="comment">
             <header><strong>${esc(comment.author_name)}</strong> <time>${esc(formatDateTime(comment.created_at))}</time></header>
-            <div class="comment-body">${textBlock(comment.body)}</div>
+            <div class="comment-body">${highlightMentions(comment.body, users)}</div>
             ${commentPerms.get(comment.id) ? `<form method="post" action="/comments/${comment.id}/delete">
               <input type="hidden" name="_csrf" value="${esc(csrf)}">
               <button class="btn btn-tiny" type="submit">Delete</button>
@@ -281,7 +345,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, canEdit, ca
         <form class="stack" method="post" action="/tasks/${task.id}/comments">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <label class="field"><span>Add a comment</span>
-            <textarea name="body" rows="3" required maxlength="8000"></textarea>
+            <textarea name="body" rows="3" required maxlength="8000" placeholder="Use @Name to mention someone"></textarea>
           </label>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Comment</button></div>
         </form>
@@ -298,9 +362,32 @@ export function renderTask({ user, csrf, msg, task, comments, users, canEdit, ca
       <section class="panel pad">
         <h1>${esc(title)}</h1>
         ${meta}
-        ${taskForm({ task, users, csrf, canEdit: isNew || canEdit })}
+        ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit })}
         ${deleteForm}
       </section>
+      ${isNew ? '' : `<section class="panel pad">
+        <h2>Files</h2>
+        ${attachments.length ? `<ul class="files">${attachments.map((file) => {
+          const removable = user.role === 'superuser' || user.role === 'admin' || file.uploaded_by === user.id;
+          return `<li>
+            <a href="/attachments/${file.id}">${esc(file.original_name)}</a>
+            <span class="hint">${Math.max(1, Math.round(file.size / 1024))} KB · ${esc(file.uploader_name)}</span>
+            ${removable ? `<form method="post" action="/attachments/${file.id}/delete">
+              <input type="hidden" name="_csrf" value="${esc(csrf)}">
+              <button class="btn btn-tiny" type="submit">Delete</button>
+            </form>` : ''}
+          </li>`;
+        }).join('')}</ul>` : '<p class="hint">No files yet. Maximum 10 MB.</p>'}
+        <form class="file-form" method="post" action="/tasks/${task.id}/attachments" enctype="multipart/form-data">
+          <input type="hidden" name="_csrf" value="${esc(csrf)}">
+          <input type="file" name="file" required>
+          <button class="btn" type="submit">Upload</button>
+        </form>
+      </section>
+      <section class="panel pad">
+        <h2>Activity</h2>
+        ${activity.length ? activity.map((item) => `<p class="activity"><strong>${esc(item.actor_name)}</strong> ${esc(item.detail)} <time>${esc(formatDateTime(item.created_at))}</time></p>`).join('') : '<p class="hint">No history yet.</p>'}
+      </section>`}
       ${commentBlock}`,
   });
 }
@@ -358,6 +445,76 @@ export function renderUsers({ user, csrf, msg, users }) {
     msg,
     active: 'users',
     crumb: '<a href="/">Tasks</a> <span class="sep">›</span> <span>Users</span>',
+    body,
+  });
+}
+
+export function renderManage({ user, csrf, msg, report, projects, users, filters, today }) {
+  const maxOpen = Math.max(1, ...report.people.map((person) => person.open_count || 0));
+  const bars = report.people.map((person) => {
+    const width = Math.round(((person.open_count || 0) / maxOpen) * 100);
+    return `<div class="bar-row">
+      <span class="bar-label">${esc(person.name)}</span>
+      <span class="bar" aria-hidden="true"><span style="width:${width}%"></span></span>
+      <span class="bar-n">${person.open_count || 0}</span>
+    </div>`;
+  }).join('');
+  const personPairs = [['none', 'Unassigned'], ...users.map((person) => [String(person.id), person.name])];
+  const doneList = (rows) => rows.length
+    ? `<ul class="plain">${rows.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')} · ${esc(task.project_name || 'No project')} · ${esc(formatDateTime(task.completed_at))}</span></li>`).join('')}</ul>`
+    : '<p class="hint">None.</p>';
+
+  const body = `
+    <form class="filters panel" method="get" action="/manage">
+      <label class="field"><span>Project</span>
+        <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
+      </label>
+      <label class="field"><span>Person</span>
+        <select name="person">${options(personPairs, filters.personId || '', 'Everyone')}</select>
+      </label>
+      <button class="btn" type="submit">Apply</button>
+      <a class="btn" href="/manage">Clear</a>
+    </form>
+    <div class="stats">
+      <div class="stat"><span>Open</span><strong>${report.totals.open}</strong></div>
+      <div class="stat"><span>Overdue</span><strong>${report.totals.overdue}</strong></div>
+      <div class="stat"><span>Done this week</span><strong>${report.totals.doneWeek}</strong></div>
+      <div class="stat"><span>Done in 7 days</span><strong>${report.totals.done7}</strong></div>
+      <div class="stat"><span>Done in 30 days</span><strong>${report.totals.done30}</strong></div>
+    </div>
+    <section class="panel pad">
+      <h2>Open tasks by person</h2>
+      ${bars || '<p class="hint">No people to show.</p>'}
+    </section>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>Person</th><th>Open</th><th>Overdue</th><th>Done this week</th></tr></thead>
+        <tbody>
+          ${report.people.map((person) => `<tr>
+            <td>${esc(person.name)}</td>
+            <td class="num">${person.open_count || 0}</td>
+            <td class="num">${person.overdue_count || 0}</td>
+            <td class="num">${person.done_week || 0}</td>
+          </tr>`).join('') || '<tr><td colspan="4">No rows.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <section class="panel pad">
+      <h2>Overdue</h2>
+      ${report.overdue.length ? `<ul class="plain">${report.overdue.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')} · ${esc(task.project_name || 'No project')} · due ${esc(formatDue(task.due_date))} · ${daysBetween(task.due_date, today)}d</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue.</p>'}
+    </section>
+    <div class="split">
+      <section class="panel pad"><h2>Completed in 7 days</h2>${doneList(report.done7)}</section>
+      <section class="panel pad"><h2>Completed in 30 days</h2>${doneList(report.done30)}</section>
+    </div>`;
+
+  return layout({
+    title: 'Manage · Sunspec',
+    user,
+    csrf,
+    msg,
+    active: 'chart',
+    crumb: '<a href="/">Tasks</a> <span class="sep">›</span> <span>Manage</span>',
     body,
   });
 }

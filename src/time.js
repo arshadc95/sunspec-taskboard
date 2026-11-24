@@ -53,3 +53,24 @@ export function isValidDate(ymd) {
 export function isOverdue(due, status, today = todayDate()) {
   return Boolean(due) && status !== 'done' && due < today;
 }
+
+export function startOfWeekIso(now = new Date()) {
+  const today = todayDate(now);
+  const [year, month, day] = today.split('-').map(Number);
+  const midnight = new Date(Date.UTC(year, month - 1, day, -2, 0, 0));
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(midnight);
+  const offset = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 }[weekday] || 0;
+  return new Date(midnight.getTime() - offset * 86400000).toISOString();
+}
+
+export function daysAgoIso(days, now = new Date()) {
+  return new Date(now.getTime() - days * 86400000).toISOString();
+}
+
+export function daysBetween(due, today) {
+  const [year, month, day] = due.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const a = Date.UTC(year, month - 1, day);
+  const b = Date.UTC(ty, tm - 1, td);
+  return Math.round((b - a) / 86400000);
+}

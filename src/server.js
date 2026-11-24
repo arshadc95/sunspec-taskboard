@@ -1,10 +1,14 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express from 'express';
-import { PRIORITIES, STATUSES } from './constants.js';
+import multer from 'multer';
+import { labelOf, PRIORITIES, STATUSES } from './constants.js';
 import { assertConfig, loadEnv, readConfig } from './config.js';
 import {
+  addActivity,
+  addAttachment,
   addComment,
   boardCounts,
   bootstrapSuperuser,
@@ -31,14 +35,25 @@ import {
   updateUser,
   userCount,
   countOtherActiveSuperusers,
+  deleteAttachment,
+  findOrCreateProject,
+  getAttachment,
+  getProject,
+  listActivity,
+  listAttachments,
+  listProjects,
+  managementReport,
+  setCommentMentions,
 } from './db.js';
 import { hashPassword, verifyPassword } from './passwords.js';
+import { mentionedUserIds } from './mentions.js';
 import { canDeleteComment, canDeleteTask, canEditTask, canEditUser, isStaff } from './permissions.js';
-import { isValidDate, todayDate } from './time.js';
+import { daysAgoIso, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
 import {
   renderBoard,
   renderForbidden,
   renderLogin,
+  renderManage,
   renderNotFound,
   renderTask,
   renderUsers,
@@ -158,6 +173,18 @@ function parseIdentity(body) {
 export function createApp(config) {
   assertConfig(config);
   const db = openDatabase(config.dbPath);
+  const uploadsDir = path.join(config.dataDir, 'uploads');
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, uploadsDir),
+      filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);
+        cb(null, crypto.randomBytes(16).toString('hex') + ext);
+      },
+    }),
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  });
   if (userCount(db) === 0) {
     if (config.adminEmail && config.adminPassword) {
       if (config.adminPassword.length < 8) {
@@ -279,7 +306,53 @@ export function createApp(config) {
       tasks,
       filters,
       users: listActiveUsers(db),
+      projects: listProjects(db),
       counts: boardCounts(db, filters.today),
+      today: filters.today,
+      exportQuery: filterQuery(filters),
+    }));
+  });
+
+  app.get('/export.csv', requireUser, (req, res) => {
+    const filters = readFilters(req);
+    const tasks = listTasks(db, filters);
+    const header = ['id', 'title', 'description', 'project', 'assignee', 'status', 'priority', 'due', 'created by', 'comments', 'created', 'updated', 'overdue'];
+    const lines = [header.join(',')];
+    for (const task of tasks) {
+      lines.push([
+        task.id,
+        task.title,
+        task.description,
+        task.project_name || '',
+        task.assignee_name || '',
+        labelOf(STATUSES, task.status),
+        labelOf(PRIORITIES, task.priority),
+        task.due_date || '',
+        task.creator_name || '',
+        task.comment_count,
+        task.created_at,
+        task.updated_at,
+        isOverdueTask(task, filters.today) ? 'yes' : 'no',
+      ].map(csvCell).join(','));
+    }
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="tasks.csv"',
+      'Cache-Control': 'no-store',
+    });
+    res.send(lines.join('\n'));
+  });
+
+  app.get('/manage', requireStaff, (req, res) => {
+    const filters = manageFilters(req);
+    html(res, 200, renderManage({
+      user: req.user,
+      csrf: ensureCsrf(req, res),
+      msg: String(req.query.msg || ''),
+      report: managementReport(db, filters),
+      projects: listProjects(db),
+      users: listActiveUsers(db),
+      filters,
       today: filters.today,
     }));
   });
@@ -292,6 +365,7 @@ export function createApp(config) {
       task: null,
       comments: [],
       users: listActiveUsers(db),
+      projects: listProjects(db),
       canEdit: true,
       canDelete: false,
       commentPerms: new Map(),
@@ -303,7 +377,10 @@ export function createApp(config) {
     const users = listActiveUsers(db);
     const parsed = parseTask(req.body, users);
     if (parsed.error) return res.redirect('/tasks/new?msg=invalid');
-    const id = createTask(db, { ...parsed, createdBy: req.user.id });
+    const projectId = projectFromBody(db, req.body, null);
+    if (projectId === false) return res.redirect('/tasks/new?msg=invalid');
+    const id = createTask(db, { ...parsed, projectId, createdBy: req.user.id });
+    addActivity(db, { taskId: id, actorId: req.user.id, action: 'created', detail: 'Created the task' });
     res.redirect(`/tasks/${id}?msg=created`);
   });
 
@@ -320,6 +397,9 @@ export function createApp(config) {
       task,
       comments,
       users: assigneeChoices(db, task),
+      projects: listProjects(db),
+      activity: listActivity(db, task.id),
+      attachments: listAttachments(db, task.id),
       canEdit: canEditTask(req.user, task),
       canDelete: canDeleteTask(req.user),
       commentPerms,
@@ -332,9 +412,13 @@ export function createApp(config) {
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     if (!canEditTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
-    const parsed = parseTask(req.body, assigneeChoices(db, task));
+    const choices = assigneeChoices(db, task);
+    const parsed = parseTask(req.body, choices);
     if (parsed.error) return res.redirect(`/tasks/${task.id}?msg=invalid`);
-    updateTask(db, task.id, parsed);
+    const projectId = projectFromBody(db, req.body, task.project_id);
+    if (projectId === false) return res.redirect(`/tasks/${task.id}?msg=invalid`);
+    const updated = updateTask(db, task.id, { ...parsed, projectId });
+    logTaskChanges(db, req.user, task, updated);
     res.redirect(`/tasks/${task.id}?msg=saved`);
   });
 
@@ -344,6 +428,9 @@ export function createApp(config) {
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     if (!canDeleteTask(req.user)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    for (const file of listAttachments(db, task.id)) {
+      fs.rmSync(path.join(uploadsDir, path.basename(file.stored_name)), { force: true });
+    }
     deleteTask(db, task.id);
     res.redirect('/?msg=deleted');
   });
@@ -355,7 +442,9 @@ export function createApp(config) {
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     const body = String(req.body.body || '').trim();
     if (!body || body.length > 8000) return res.redirect(`/tasks/${task.id}?msg=invalid`);
-    addComment(db, { taskId: task.id, authorId: req.user.id, body });
+    const commentId = addComment(db, { taskId: task.id, authorId: req.user.id, body });
+    setCommentMentions(db, commentId, mentionedUserIds(body, listActiveUsers(db)));
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'comment', detail: 'Added a comment' });
     res.redirect(`/tasks/${task.id}?msg=commented`);
   });
 
@@ -366,6 +455,7 @@ export function createApp(config) {
     if (!comment) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     if (!canDeleteComment(req.user, comment)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     deleteComment(db, comment.id);
+    addActivity(db, { taskId: comment.task_id, actorId: req.user.id, action: 'comment', detail: 'Deleted a comment' });
     res.redirect(`/tasks/${comment.task_id}?msg=deleted`);
   });
 
@@ -418,6 +508,65 @@ export function createApp(config) {
     res.redirect('/users?msg=saved');
   });
 
+  app.post('/tasks/:id/attachments', requireUser, (req, res, next) => {
+    upload.single('file')(req, res, (error) => {
+      if (error && error.code === 'LIMIT_FILE_SIZE') return res.redirect(`/tasks/${req.params.id}?msg=toobig`);
+      if (error) return next(error);
+      if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+      const id = numericId(req.params.id);
+      const task = id ? getTask(db, id) : null;
+      if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+      if (!req.file || !req.file.size) {
+        if (req.file) fs.rmSync(req.file.path, { force: true });
+        return res.redirect(`/tasks/${task.id}?msg=invalid`);
+      }
+      const original = path.basename(req.file.originalname || 'file').slice(0, 180) || 'file';
+      addAttachment(db, {
+        taskId: task.id,
+        uploadedBy: req.user.id,
+        storedName: req.file.filename,
+        originalName: original,
+        mime: req.file.mimetype || '',
+        size: req.file.size,
+      });
+      addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'attachment', detail: `Attached ${original}` });
+      res.redirect(`/tasks/${task.id}?msg=saved`);
+    });
+  });
+
+  app.get('/attachments/:id', requireUser, (req, res) => {
+    const id = numericId(req.params.id);
+    const file = id ? getAttachment(db, id) : null;
+    if (!file || file.stored_name.includes('..') || file.stored_name.includes('/') || file.stored_name.includes('\\')) {
+      return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    }
+    const root = path.resolve(uploadsDir);
+    const full = path.resolve(root, file.stored_name);
+    if (!full.startsWith(`${root}${path.sep}`)) return res.status(400).end();
+    const risky = /svg|html|xml|javascript/i.test(`${file.mime} ${file.original_name}`);
+    const filename = file.original_name.replace(/["\r\n]/g, '');
+    res.set({
+      'Content-Type': risky ? 'application/octet-stream' : (file.mime || 'application/octet-stream'),
+      'Content-Disposition': `attachment; filename="${filename.replace(/[^\w.\- ]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(file.original_name)}`,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+    });
+    res.sendFile(full);
+  });
+
+  app.post('/attachments/:id/delete', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const file = id ? getAttachment(db, id) : null;
+    if (!file) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const allowed = req.user.role === 'superuser' || req.user.role === 'admin' || file.uploaded_by === req.user.id;
+    if (!allowed) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    deleteAttachment(db, file.id);
+    fs.rmSync(path.join(uploadsDir, file.stored_name), { force: true });
+    addActivity(db, { taskId: file.task_id, actorId: req.user.id, action: 'attachment', detail: `Removed ${file.original_name}` });
+    res.redirect(`/tasks/${file.task_id}?msg=deleted`);
+  });
+
   app.use((req, res) => {
     if (!req.user) return res.redirect('/login');
     html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
@@ -438,14 +587,99 @@ function readFilters(req) {
   if (mine) assigneeId = req.user.id;
   else if (req.query.assignee === 'none') assigneeId = 'none';
   else if (/^\d+$/.test(String(req.query.assignee || ''))) assigneeId = Number(req.query.assignee);
+  const projectId = /^\d+$/.test(String(req.query.project || '')) ? Number(req.query.project) : null;
+  const mentions = req.query.mentions === '1';
   return {
     status,
     mine,
     assigneeId,
+    projectId,
+    mentions,
+    mentionUserId: mentions ? req.user.id : null,
     overdue: req.query.overdue === '1',
     search: String(req.query.q || '').trim().slice(0, 100),
     today: todayDate(),
   };
+}
+
+function filterQuery(filters) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.mine) params.set('mine', '1');
+  else if (filters.assigneeId === 'none') params.set('assignee', 'none');
+  else if (filters.assigneeId) params.set('assignee', String(filters.assigneeId));
+  if (filters.projectId) params.set('project', String(filters.projectId));
+  if (filters.overdue) params.set('overdue', '1');
+  if (filters.mentions) params.set('mentions', '1');
+  if (filters.search) params.set('q', filters.search);
+  return params.toString();
+}
+
+function manageFilters(req) {
+  const projectId = /^\d+$/.test(String(req.query.project || '')) ? Number(req.query.project) : null;
+  let personId = null;
+  if (req.query.person === 'none') personId = 'none';
+  else if (/^\d+$/.test(String(req.query.person || ''))) personId = Number(req.query.person);
+  const now = new Date();
+  return {
+    projectId,
+    personId,
+    today: todayDate(now),
+    weekStart: startOfWeekIso(now),
+    since7: daysAgoIso(7, now),
+    since30: daysAgoIso(30, now),
+  };
+}
+
+function projectFromBody(db, body, currentId) {
+  const typed = String(body.new_project || '').trim();
+  if (typed) {
+    if (typed.length > 80) return false;
+    return findOrCreateProject(db, typed);
+  }
+  const raw = String(body.project_id || '').trim();
+  if (!raw) return null;
+  if (!/^\d+$/.test(raw)) return false;
+  const project = getProject(db, Number(raw));
+  if (!project) return false;
+  return project.id || currentId;
+}
+
+function personName(db, id) {
+  if (!id) return 'Unassigned';
+  return getUser(db, id)?.name || 'Unknown';
+}
+
+function logTaskChanges(db, actor, before, after) {
+  const changes = [];
+  if (before.status !== after.status) {
+    changes.push(['status', `Status: ${labelOf(STATUSES, before.status)} → ${labelOf(STATUSES, after.status)}`]);
+  }
+  if ((before.assignee_id || null) !== (after.assignee_id || null)) {
+    changes.push(['assignee', `Assignee: ${personName(db, before.assignee_id)} → ${personName(db, after.assignee_id)}`]);
+  }
+  if ((before.due_date || '') !== (after.due_date || '')) {
+    changes.push(['due', `Due: ${formatDue(before.due_date)} → ${formatDue(after.due_date)}`]);
+  }
+  if ((before.priority || '') !== (after.priority || '')) {
+    changes.push(['priority', `Priority: ${labelOf(PRIORITIES, before.priority) || '—'} → ${labelOf(PRIORITIES, after.priority) || '—'}`]);
+  }
+  if ((before.project_id || null) !== (after.project_id || null)) {
+    changes.push(['project', `Project: ${before.project_name || '—'} → ${after.project_name || '—'}`]);
+  }
+  for (const [action, detail] of changes) {
+    addActivity(db, { taskId: after.id, actorId: actor.id, action, detail });
+  }
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function isOverdueTask(task, today) {
+  return Boolean(task.due_date) && task.status !== 'done' && task.due_date < today;
 }
 
 export function start() {
