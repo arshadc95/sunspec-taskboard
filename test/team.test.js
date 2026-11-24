@@ -25,7 +25,6 @@ test('an empty team card does not show a table of zeros', () => {
   assert.match(html, /class="swatch c-/);
   assert.match(html, /No open tasks/);
   assert.match(html, /No hours this month/);
-  assert.match(html, /Workload<\/span><span>0 open of team max 0<\/span>/);
   assert.match(html, /On time —/);
   assert.match(html, /No streak/);
   assert.doesNotMatch(html, /None yet/);
@@ -77,8 +76,6 @@ test('a team card lists the next three due tasks and the colour', () => {
   assert.match(html, /class="hot"[\s\S]*?<span>Overdue<\/span><strong>1<\/strong>/);
   assert.match(html, /Done this month<\/span><strong>1<\/strong>/);
   assert.match(html, /class="w-100"/);
-  assert.match(html, /Workload<\/span><span>5 open of team max 5<\/span>/);
-  assert.match(html, /title="Workload: 5 open of team max 5"/);
   assert.doesNotMatch(html, / style=/);
   assert.match(html, /href="\/tasks\/\d+">Overdue meter</);
   assert.match(html, /class="late"/);

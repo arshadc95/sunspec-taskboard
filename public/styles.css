@@ -863,10 +863,8 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .person-nums span { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #555; }
 .person-nums strong { font-size: 28px; line-height: 1; }
 .person-nums .hot strong { color: #dc2626; }
-.person-small { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0 12px 6px; color: #555; font-size: 12px; }
-.load { margin: 0 12px 8px; }
-.load-label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; height: 14px; margin: 0 0 3px; overflow: hidden; color: #777; font-size: 11px; line-height: 14px; white-space: nowrap; }
-.load-track { height: 4px; margin: 0; background: #eee; }
+.person-small { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0 12px 10px; color: #555; font-size: 12px; }
+.load-track { height: 4px; margin: 0 12px 10px; background: #eee; }
 .load-track span { display: block; height: 4px; background: #f97316; }
 .load-track .w-0 { width: 0%; }
 .load-track .w-1 { width: 1%; }
