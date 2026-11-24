@@ -709,6 +709,7 @@ export function listProjects(db) {
 }
 
 export function boardSnapshot(db) {
+  const totals = timeTotals(db);
   return {
     users: db.prepare(`
       SELECT id, name FROM users
@@ -730,6 +731,7 @@ export function boardSnapshot(db) {
       assignee_ids: task.assignee_ids,
       due: task.due,
       priority: task.priority,
+      time_seconds: totals.get(task.id) || 0,
     })),
   };
 }
@@ -972,7 +974,7 @@ export function stopTimer(db, { userId, taskId }) {
 
 export function listTimeEntries(db, taskId) {
   return db.prepare(`
-    SELECT te.*, u.name AS user_name
+    SELECT te.*, u.name AS user_name, u.color AS color
     FROM time_entries te
     JOIN users u ON u.id = te.user_id
     WHERE te.task_id = ?

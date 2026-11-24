@@ -141,9 +141,9 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     const csvText = await csv.text();
     assert.match(csvText, /Tubecon logger/);
     assert.match(csvText, /yes/);
-    assert.doesNotMatch(csvText.split('\n')[0], /(^|,)time(,|$)/i);
-    assert.doesNotMatch(filtered.text, /<th>Time<\/th>/);
-    assert.doesNotMatch(detail.text, /<h2>Time<\/h2>/);
+    assert.match(csvText.split('\n')[0], /(^|,)time(,|$)/i);
+    assert.match(filtered.text, /<th>Time<\/th>/);
+    assert.match(detail.text, /<h2>Time<\/h2>/);
 
     const manageDenied = await page(base, lindi.cookies, '/manage');
     assert.equal(manageDenied.res.status, 403);

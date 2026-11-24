@@ -220,8 +220,7 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     assert.equal(Object.hasOwn(snapTask, 'assignee_id'), true);
     assert.equal(Object.hasOwn(snapTask, 'due'), true);
     assert.equal(Object.hasOwn(snapTask, 'priority'), true);
-    assert.equal(Object.hasOwn(snapTask, 'time_seconds'), false);
-    assert.equal(Object.hasOwn(snapTask, 'seconds'), false);
+    assert.equal(typeof snapTask.time_seconds, 'number');
     const taskStatus = await fetch(`${base}/api/bot/tasks/${taskId}/status`, {
       method: 'POST',
       headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
