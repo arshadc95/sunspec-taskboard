@@ -80,7 +80,7 @@ function doc(title, bodyClass, body) {
 </head>
 <body class="${bodyClass}">
 ${body}
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>`;
 }

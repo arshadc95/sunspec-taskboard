@@ -1,3 +1,5 @@
+import { applyGrokClick } from './grok-panel.js';
+
 document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
   document.body.classList.toggle('nav-open');
 });
@@ -749,17 +751,29 @@ if (grokRoot) {
     watch();
   }
 
-  bubble.addEventListener('click', () => {
-    open = true;
-    panel.hidden = false;
+  function setOpen(next) {
+    open = next;
+    panel.hidden = !open;
+    if (!open) {
+      toggleList(false);
+      watch();
+      return;
+    }
     clearUnread();
     load().then(() => { seeThread(threadId); watch(); }).catch(() => {});
+  }
+  bubble.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setOpen(applyGrokClick(open, 'bubble', true));
   });
-  grokRoot.querySelector('[data-grok-close]').addEventListener('click', () => {
-    open = false;
-    panel.hidden = true;
-    toggleList(false);
-    watch();
+  grokRoot.querySelector('[data-grok-close]').addEventListener('click', (event) => {
+    event.stopPropagation();
+    setOpen(applyGrokClick(open, 'close', true));
+  });
+  document.addEventListener('click', (event) => {
+    if (!open) return;
+    const next = applyGrokClick(open, 'outside', grokRoot.contains(event.target));
+    if (next !== open) setOpen(next);
   });
   grokRoot.querySelector('[data-grok-chats]').addEventListener('click', () => toggleList());
   grokRoot.querySelector('[data-grok-new]').addEventListener('click', async () => {
