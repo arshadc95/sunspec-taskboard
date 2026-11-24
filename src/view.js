@@ -450,8 +450,12 @@ export function renderUsers({ user, csrf, msg, users }) {
 }
 
 export function renderManage({ user, csrf, msg, report, projects, users, filters, today }) {
-  const maxOpen = Math.max(1, ...report.people.map((person) => person.open_count || 0));
-  const bars = report.people.map((person) => {
+  const rows = [...report.people];
+  if (report.unassigned && ((report.unassigned.open_count || 0) + (report.unassigned.overdue_count || 0) + (report.unassigned.done_week || 0)) > 0) {
+    rows.push({ name: 'Unassigned', ...report.unassigned });
+  }
+  const maxOpen = Math.max(1, ...rows.map((person) => person.open_count || 0));
+  const bars = rows.map((person) => {
     const width = Math.round(((person.open_count || 0) / maxOpen) * 100);
     return `<div class="bar-row">
       <span class="bar-label">${esc(person.name)}</span>
@@ -490,7 +494,7 @@ export function renderManage({ user, csrf, msg, report, projects, users, filters
       <table class="grid">
         <thead><tr><th>Person</th><th>Open</th><th>Overdue</th><th>Done this week</th></tr></thead>
         <tbody>
-          ${report.people.map((person) => `<tr>
+          ${rows.map((person) => `<tr>
             <td>${esc(person.name)}</td>
             <td class="num">${person.open_count || 0}</td>
             <td class="num">${person.overdue_count || 0}</td>

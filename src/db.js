@@ -571,8 +571,27 @@ export function managementReport(db, filters) {
     WHERE ${totalWhere}
   `).get(filters.today, filters.weekStart, filters.since7, filters.since30, ...totalParams);
 
+  let unassigned = null;
+  if (!filters.personId || filters.personId === 'none') {
+    const params = [filters.today, filters.weekStart];
+    let projectSql = '';
+    if (filters.projectId) {
+      projectSql = 'AND project_id = ?';
+      params.push(filters.projectId);
+    }
+    unassigned = db.prepare(`
+      SELECT
+        SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open_count,
+        SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
+        SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_week
+      FROM tasks
+      WHERE assignee_id IS NULL ${projectSql}
+    `).get(...params);
+  }
+
   return {
     people,
+    unassigned,
     overdue,
     done7: doneSince(filters.since7),
     done30: doneSince(filters.since30),
