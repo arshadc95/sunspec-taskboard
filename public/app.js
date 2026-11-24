@@ -27,10 +27,9 @@ const standardRoot = document.querySelector('[data-standard]');
 const standardList = readJson('standards-data');
 if (standardRoot && standardList.length) {
   const code = standardRoot.querySelector('[data-std-code]');
-  const summary = standardRoot.querySelector('[data-std-summary]');
+  const title = standardRoot.querySelector('[data-std-title]');
+  const why = standardRoot.querySelector('[data-std-why]');
   const tag = standardRoot.querySelector('[data-std-tag]');
-  const tip = standardRoot.querySelector('[data-std-tip]');
-  const more = standardRoot.querySelector('[data-std-more]');
   const deck = [
     ...standardList.filter((item) => item.kind !== 'concept'),
     ...standardList.filter((item) => item.kind === 'concept'),
@@ -40,14 +39,10 @@ if (standardRoot && standardList.length) {
   const show = (next, remember) => {
     index = (next + deck.length) % deck.length;
     const item = deck[index];
+    if (title) title.textContent = item.title;
     if (code) code.textContent = item.code;
-    if (summary) summary.textContent = item.summary;
+    if (why) why.textContent = item.why;
     if (tag) tag.textContent = item.category;
-    if (tip) {
-      tip.textContent = item.tip;
-      tip.hidden = true;
-    }
-    more?.setAttribute('aria-expanded', 'false');
     if (remember) {
       try { localStorage.setItem('std-last', item.id); } catch { /* private mode */ }
     }
@@ -61,11 +56,6 @@ if (standardRoot && standardList.length) {
   show(start, true);
   standardRoot.querySelector('[data-std-prev]')?.addEventListener('click', () => show(index - 1, true));
   standardRoot.querySelector('[data-std-next]')?.addEventListener('click', () => show(index + 1, true));
-  more?.addEventListener('click', () => {
-    const open = tip.hasAttribute('hidden');
-    tip.toggleAttribute('hidden', !open);
-    more.setAttribute('aria-expanded', open ? 'true' : 'false');
-  });
 }
 
 document.querySelectorAll('form[data-live]').forEach((form) => {

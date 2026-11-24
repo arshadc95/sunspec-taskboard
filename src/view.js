@@ -490,13 +490,12 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
       <div class="std" data-standard>
         <div class="std-row">
           <span class="std-tag" data-std-tag>${esc(first.category)}</span>
-          <strong class="std-code" data-std-code>${esc(first.code)}</strong>
-          <span class="std-line" data-std-summary>${esc(first.summary)}</span>
-          <button type="button" class="std-more" data-std-more aria-expanded="false">Why</button>
+          <strong class="std-title" data-std-title>${esc(first.title)}</strong>
+          <span class="std-code" data-std-code>${esc(first.code)}</span>
           <button type="button" class="std-nav" data-std-prev aria-label="Previous standard">‹</button>
           <button type="button" class="std-nav" data-std-next aria-label="Next standard">›</button>
         </div>
-        <p class="std-detail" data-std-tip hidden>${esc(first.tip)}</p>
+        <p class="std-why" data-std-why>${esc(first.why)}</p>
       </div>
     </div>
     <script type="application/json" id="standards-data">${JSON.stringify(standards).replace(/</g, '\\u003c')}</script>`;
