@@ -509,6 +509,7 @@ table.users td { min-width: 90px; }
   border: 1px solid #000;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   font-family: Inter, sans-serif;
 }
 .grok-head {
@@ -519,7 +520,31 @@ table.users td { min-width: 90px; }
   color: #fff;
   padding: 8px 10px;
 }
-.grok-head button { background: transparent; color: #fff; border: 0; font-size: 20px; cursor: pointer; }
+.grok-head button { background: transparent; color: #fff; border: 0; font: inherit; font-weight: 700; cursor: pointer; }
+.grok-chats {
+  position: absolute;
+  z-index: 2;
+  top: 37px;
+  bottom: 0;
+  left: 0;
+  width: 240px;
+  max-width: 86%;
+  background: #fff;
+  color: #000;
+  border-right: 1px solid #000;
+  overflow: auto;
+  transform: translateX(-105%);
+}
+.grok-chats.is-open { transform: translateX(0); }
+.grok-chat { display: flex; gap: 4px; align-items: center; padding: 6px; border-bottom: 1px solid #ddd; }
+.grok-chat.is-current { background: #f3f3f3; }
+.grok-chat input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; }
+.grok-chat button { border: 0; background: transparent; cursor: pointer; font-weight: 700; }
+.grok-compose { display: flex; }
+.grok-attach { display: flex; align-items: center; padding: 0 8px; border-right: 1px solid #000; font-size: 12px; font-weight: 700; cursor: pointer; }
+.grok-picked { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px; }
+.grok-picked span { background: #1a1a1a; color: #fff; padding: 2px 6px; font-size: 12px; }
+.grok-file a { color: #fff; }
 .grok-log { flex: 1; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .grok-mine, .grok-theirs, .grok-note, .grok-wait {
   margin: 0;
@@ -531,9 +556,10 @@ table.users td { min-width: 90px; }
 }
 .grok-mine { background: #000; }
 .grok-note, .grok-wait { background: #fff; color: #1a1a1a; border: 1px solid #1a1a1a; }
-.grok-form { display: flex; border-top: 1px solid #000; }
-.grok-form input { flex: 1; border: 0; padding: 10px; font: inherit; }
-.grok-form button { border: 0; background: #000; color: #fff; padding: 0 12px; font-weight: 700; cursor: pointer; }
+.grok-form { display: flex; flex-direction: column; border-top: 1px solid #000; }
+.grok-compose input { flex: 1; border: 0; padding: 10px; font: inherit; }
+.grok-compose > button { border: 0; background: #000; color: #fff; padding: 0 12px; font-weight: 700; cursor: pointer; }
+.grok-picked button { border: 0; background: transparent; color: #fff; cursor: pointer; }
 
 @media (max-width: 800px) {
   .grok-bubble { bottom: 136px; }
@@ -545,4 +571,5 @@ table.users td { min-width: 90px; }
     height: auto;
     max-height: none;
   }
+  .grok-chats { top: 0; width: 86%; }
 }

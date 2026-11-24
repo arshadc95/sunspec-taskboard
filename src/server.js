@@ -48,11 +48,22 @@ import {
   listRemovedTasks,
   listRunningTimers,
   listTimeEntries,
+  addGrokFile,
   addGrokMessage,
+  createGrokThread,
+  deleteGrokFileRow,
+  deleteGrokThread,
   ensureGrokUser,
-  getOrCreateGrokThread,
+  getGrokFile,
+  getGrokThread,
+  latestGrokThread,
+  listExpiredGrokFiles,
+  listGrokFiles,
   listGrokMessages,
+  listGrokThreads,
+  nameGrokThreadFromMessage,
   recordGrokRequest,
+  renameGrokThread,
   getRunningTimer,
   markMentionsRead,
   myDay,
@@ -73,7 +84,7 @@ import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
 import { daysAgoIso, entrySeconds, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
-import { grokConnected, mountBot, postGrokWebhook, rateLimitMessage, recentContext } from './grok.js';
+import { fileExpiry, grokConnected, grokFileExpiry, isPdf, mountBot, pdfFilename, postGrokWebhook, rateLimitMessage, recentContext, webhookFiles } from './grok.js';
 import {
   renderBoard,
   renderCalendar,
@@ -201,7 +212,19 @@ export function createApp(config) {
   assertConfig(config);
   const db = openDatabase(config.dbPath);
   const uploadsDir = path.join(config.dataDir, 'uploads');
+  const grokDir = path.join(config.dataDir, 'grok-files');
   fs.mkdirSync(uploadsDir, { recursive: true });
+  fs.mkdirSync(grokDir, { recursive: true });
+  const purgeGrokFiles = () => {
+    const expired = listExpiredGrokFiles(db, new Date().toISOString());
+    for (const row of expired) {
+      fs.rmSync(path.join(grokDir, row.stored_name), { force: true });
+      deleteGrokFileRow(db, row.id);
+    }
+  };
+  purgeGrokFiles();
+  const grokCleanup = setInterval(purgeGrokFiles, 60 * 60 * 1000);
+  grokCleanup.unref?.();
   const upload = multer({
     storage: multer.diskStorage({
       destination: (req, file, cb) => cb(null, uploadsDir),
@@ -211,6 +234,13 @@ export function createApp(config) {
       },
     }),
     limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  });
+  const grokUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, grokDir),
+      filename: (req, file, cb) => cb(null, `${crypto.randomBytes(16).toString('hex')}.pdf`),
+    }),
+    limits: { fileSize: 15 * 1024 * 1024, files: 5 },
   });
   if (userCount(db) === 0) {
     if (config.adminEmail && config.adminPassword) {
@@ -235,6 +265,7 @@ export function createApp(config) {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.locals.db = db;
+  app.locals.purgeGrokFiles = purgeGrokFiles;
   app.use((req, res, next) => {
     res.set({
       'X-Content-Type-Options': 'nosniff',
@@ -489,6 +520,14 @@ export function createApp(config) {
     markMentionsRead(db, req.user.id, task.id);
     req.user.unreadMentions = unreadMentionCount(db, req.user.id);
     const comments = listComments(db, task.id);
+    const taskFiles = listGrokFiles(db, { taskId: task.id });
+    const filesByComment = new Map();
+    for (const file of taskFiles) {
+      const key = file.comment_id || 0;
+      if (!filesByComment.has(key)) filesByComment.set(key, []);
+      filesByComment.get(key).push(fileExpiry(file));
+    }
+    for (const comment of comments) comment.files = filesByComment.get(comment.id) || [];
     const commentPerms = new Map(comments.map((comment) => [comment.id, canDeleteComment(req.user, comment)]));
     const commentKudos = kudosSummary(db, req.user.id, 'comment', comments.map((comment) => comment.id));
     const taskKudos = kudosSummary(db, req.user.id, 'task', [task.id]);
@@ -498,6 +537,7 @@ export function createApp(config) {
       msg: String(req.query.msg || ''),
       task,
       comments,
+      grokFiles: filesByComment.get(0) || [],
       users: assigneeChoices(db, task),
       projects: listProjects(db),
       activity: listActivity(db, task.id),
@@ -638,13 +678,21 @@ export function createApp(config) {
     res.redirect('/users?msg=saved');
   });
 
-  app.post('/tasks/:id/comments', requireUser, (req, res) => {
-    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+  app.post('/tasks/:id/comments', requireUser, async (req, res) => {
     const id = numericId(req.params.id);
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const uploaded = await readUploadedPdfs(req, res);
+    if (!csrfOk(req)) {
+      discardUploads(uploaded.files);
+      return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    }
+    if (uploaded.error) return res.redirect(`/tasks/${task.id}?msg=grokfile`);
     const body = String(req.body.body || '').trim();
-    if (!body || body.length > 8000) return res.redirect(`/tasks/${task.id}?msg=invalid`);
+    if (!body || body.length > 8000) {
+      discardUploads(uploaded.files);
+      return res.redirect(`/tasks/${task.id}?msg=invalid`);
+    }
     const commentId = addComment(db, { taskId: task.id, authorId: req.user.id, body });
     const candidates = listActiveUsers(db).concat([{ id: grokUser.id, name: grokUser.name, email: grokUser.email }]);
     const rawMentions = mentionedUserIds(body, candidates);
@@ -654,7 +702,13 @@ export function createApp(config) {
     notifyMentions(db, { taskId: task.id, userIds: mentioned, actorId: req.user.id });
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'comment', detail: 'Added a comment' });
     let grokNote = '';
-    if (grokMentioned) grokNote = askGrok(req, task, body);
+    if (grokMentioned) {
+      const rows = storeUploads(uploaded.files, { ownerUserId: req.user.id, taskId: task.id, commentId, kind: 'in' });
+      grokNote = askGrok(req, task, body, rows);
+    } else if (uploaded.files.length) {
+      discardUploads(uploaded.files);
+      grokNote = 'grokpdf';
+    }
     res.redirect(`/tasks/${task.id}?msg=${grokNote || 'commented'}`);
   });
 
@@ -778,21 +832,93 @@ export function createApp(config) {
     res.redirect(`/tasks/${file.task_id}?msg=deleted`);
   });
 
-  app.get('/api/grok', requireUser, (req, res) => {
-    const thread = getOrCreateGrokThread(db, req.user.id);
-    res.json(grokState(thread.id));
+  app.get('/files/:id', requireUser, (req, res) => {
+    const row = getGrokFile(db, numericId(req.params.id));
+    if (!row) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (Date.parse(row.expires_at) <= Date.now()) return res.status(410).type('text').send('This file has expired.');
+    let allowed = false;
+    if (row.thread_id) {
+      const thread = getGrokThread(db, row.thread_id);
+      allowed = Boolean(thread && thread.user_id === req.user.id);
+    } else if (row.task_id) {
+      allowed = Boolean(getTask(db, row.task_id));
+    }
+    if (!allowed) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const root = path.resolve(grokDir);
+    const full = path.resolve(root, row.stored_name);
+    if (!full.startsWith(`${root}${path.sep}`) || !fs.existsSync(full)) {
+      return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    }
+    const filename = row.filename.replace(/["\r\n]/g, '');
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename.replace(/[^\w.\- ]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+    });
+    res.sendFile(full);
   });
 
-  app.post('/api/grok', requireUser, (req, res) => {
+  app.get('/api/grok', requireUser, (req, res) => {
+    const requested = /^\d+$/.test(String(req.query.thread || '')) ? Number(req.query.thread) : null;
+    const state = grokState(req.user.id, requested);
+    if (!state) return res.status(404).json({ error: 'Chat not found' });
+    res.json(state);
+  });
+
+  app.post('/api/grok/threads', requireUser, (req, res) => {
     if (!csrfOk(req)) return res.status(403).json({ error: 'Form expired. Reload the page and try again.' });
+    const thread = createGrokThread(db, req.user.id);
+    res.json(grokState(req.user.id, thread.id));
+  });
+
+  app.post('/api/grok/threads/:id/rename', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).json({ error: 'Form expired. Reload the page and try again.' });
+    const thread = renameGrokThread(db, numericId(req.params.id), req.user.id, String(req.body.title || ''));
+    if (!thread) return res.status(404).json({ error: 'Chat not found' });
+    res.json(grokState(req.user.id, thread.id));
+  });
+
+  app.post('/api/grok/threads/:id/delete', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).json({ error: 'Form expired. Reload the page and try again.' });
+    const removed = deleteGrokThread(db, numericId(req.params.id), req.user.id);
+    if (!removed) return res.status(404).json({ error: 'Chat not found' });
+    for (const file of removed) fs.rmSync(path.join(grokDir, file.stored_name), { force: true });
+    res.json(grokState(req.user.id, null));
+  });
+
+  app.post('/api/grok', requireUser, async (req, res) => {
+    const uploaded = await readUploadedPdfs(req, res);
+    if (!csrfOk(req)) {
+      discardUploads(uploaded.files);
+      return res.status(403).json({ error: 'Form expired. Reload the page and try again.' });
+    }
+    if (uploaded.error) return res.status(400).json({ error: uploaded.error });
     const text = String(req.body.text || '').trim();
-    if (!text || text.length > 4000) return res.status(400).json({ error: 'Write a message first.' });
-    if (!grokConnected(config)) return res.status(503).json({ error: "Grok isn't connected yet", connected: false });
+    if (text.length > 4000 || (!text && !uploaded.files.length)) {
+      discardUploads(uploaded.files);
+      return res.status(400).json({ error: text.length > 4000 ? 'That message is too long.' : 'Write a message or attach a PDF.' });
+    }
+    if (!grokConnected(config)) {
+      discardUploads(uploaded.files);
+      return res.status(503).json({ error: "Grok isn't connected yet", connected: false });
+    }
     const limited = rateLimitMessage(db, config, req.user.id);
-    if (limited) return res.status(429).json({ error: limited });
-    const thread = getOrCreateGrokThread(db, req.user.id);
+    if (limited) {
+      discardUploads(uploaded.files);
+      return res.status(429).json({ error: limited });
+    }
+    const requested = /^\d+$/.test(String(req.body.thread_id || '')) ? Number(req.body.thread_id) : null;
+    let thread = requested ? getGrokThread(db, requested) : latestGrokThread(db, req.user.id);
+    if (requested && (!thread || thread.user_id !== req.user.id)) {
+      discardUploads(uploaded.files);
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+    if (!thread) thread = createGrokThread(db, req.user.id);
     const requestId = crypto.randomBytes(12).toString('hex');
-    addGrokMessage(db, { threadId: thread.id, role: 'user', body: text, requestId, status: 'complete' });
+    const messageId = addGrokMessage(db, { threadId: thread.id, role: 'user', body: text, requestId, status: 'complete' });
+    nameGrokThreadFromMessage(db, thread.id, text || pdfFilename(uploaded.files[0]?.originalname || ''));
+    const rows = storeUploads(uploaded.files, { ownerUserId: req.user.id, threadId: thread.id, messageId, kind: 'in' });
     addGrokMessage(db, { threadId: thread.id, role: 'grok', body: '', requestId, status: 'pending' });
     recordGrokRequest(db, req.user.id);
     const history = listGrokMessages(db, thread.id);
@@ -802,25 +928,50 @@ export function createApp(config) {
       user: { id: req.user.id, name: req.user.name, role: req.user.role },
       text,
       thread_id: thread.id,
+      files: webhookFiles(rows),
       recent_context: recentContext(history.filter((row) => row.status === 'complete' && row.body)),
       board_url: `${req.protocol}://${req.get('host')}/`,
     });
-    res.json(grokState(thread.id));
+    res.json(grokState(req.user.id, thread.id));
   });
 
-  mountBot(app, { db, config, grokUser: () => grokUser });
+  mountBot(app, { db, config, grokUser: () => grokUser, grokDir });
 
-  function grokState(threadId) {
-    const messages = listGrokMessages(db, threadId);
+  function grokState(userId, threadId) {
+    const threads = listGrokThreads(db, userId);
+    let thread = null;
+    if (threadId) {
+      thread = threads.find((item) => item.id === threadId) || null;
+      if (!thread) return null;
+    } else thread = threads[0] || null;
+    const messages = thread ? listGrokMessages(db, thread.id) : [];
+    const grouped = new Map();
+    const loose = [];
+    for (const file of thread ? listGrokFiles(db, { threadId: thread.id }) : []) {
+      const view = fileExpiry(file);
+      if (file.message_id) {
+        if (!grouped.has(file.message_id)) grouped.set(file.message_id, []);
+        grouped.get(file.message_id).push(view);
+      } else loose.push(view);
+    }
     return {
       connected: grokConnected(config),
-      thread_id: threadId,
+      thread_id: thread ? thread.id : null,
+      title: thread?.title || '',
       pending: messages.some((row) => row.status === 'pending'),
-      messages: messages.map((row) => ({ id: row.id, role: row.role, body: row.body, status: row.status })),
+      threads: threads.map((item) => ({ id: item.id, title: item.title, updated_at: item.updated_at })),
+      messages: messages.map((row) => ({
+        id: row.id,
+        role: row.role,
+        body: row.body,
+        status: row.status,
+        files: grouped.get(row.id) || [],
+      })),
+      files: loose,
     };
   }
 
-  function askGrok(req, task, text) {
+  function askGrok(req, task, text, files = []) {
     if (!grokConnected(config)) return 'grokoff';
     const limited = rateLimitMessage(db, config, req.user.id);
     if (limited) return 'groklimit';
@@ -839,6 +990,7 @@ export function createApp(config) {
         assignee: task.assignee_name || null,
         due: task.due_date || null,
       },
+      files: webhookFiles(files),
       recent_context: recentContext(comments.slice(-10).map((comment) => ({
         role: comment.author_name,
         body: comment.body,
@@ -847,6 +999,44 @@ export function createApp(config) {
       board_url: `${req.protocol}://${req.get('host')}/tasks/${task.id}`,
     });
     return '';
+  }
+
+  function readUploadedPdfs(req, res) {
+    return new Promise((resolve) => {
+      const type = String(req.get('content-type') || '');
+      if (!type.includes('multipart/form-data')) return resolve({ files: [] });
+      grokUpload.array('files', 5)(req, res, (error) => {
+        if (error) {
+          const tooBig = error.code === 'LIMIT_FILE_SIZE' || error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE';
+          return resolve({ error: tooBig ? 'Each PDF must be 15 MB or smaller, and only five at a time.' : 'Could not read that file.', files: [] });
+        }
+        const files = req.files || [];
+        for (const file of files) {
+          const header = Buffer.alloc(5);
+          const fd = fs.openSync(file.path, 'r');
+          try { fs.readSync(fd, header, 0, 5, 0); } finally { fs.closeSync(fd); }
+          if (!isPdf(header)) {
+            discardUploads(files);
+            return resolve({ error: 'Only PDF files can be attached.', files: [] });
+          }
+        }
+        resolve({ files });
+      });
+    });
+  }
+
+  function storeUploads(files, fields) {
+    return (files || []).map((file) => addGrokFile(db, {
+      ...fields,
+      filename: pdfFilename(file.originalname),
+      storedName: path.basename(file.filename),
+      size: file.size,
+      expiresAt: grokFileExpiry(config),
+    }));
+  }
+
+  function discardUploads(files) {
+    for (const file of files || []) fs.rmSync(file.path, { force: true });
   }
 
   app.use((req, res) => {

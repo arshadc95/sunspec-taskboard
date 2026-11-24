@@ -1,17 +1,25 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import express from 'express';
+import multer from 'multer';
 import {
   activeUserIds,
   addActivity,
   addComment,
+  addGrokFile,
+  bindLooseGrokCommentFiles,
   completeGrokReply,
   countGrokRequests,
   createTask,
   findOrCreateProject,
+  getGrokFile,
   getGrokThread,
   getProject,
   getTask,
   getUser,
+  latestGrokCommentId,
+  latestGrokMessageId,
   listActiveUsers,
   listComments,
   listProjects,
@@ -58,6 +66,41 @@ export function postGrokWebhook(config, payload) {
     signal: controller.signal,
   }).catch(() => {}).finally(() => clearTimeout(timer));
   return true;
+}
+
+const PDF_MAX = 15 * 1024 * 1024;
+
+export function isPdf(buffer) {
+  return buffer.length >= 5 && buffer.subarray(0, 5).toString('latin1').startsWith('%PDF-');
+}
+
+export function pdfFilename(name) {
+  const base = path.basename(String(name || 'file.pdf')).replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+  return base.toLowerCase().endsWith('.pdf') ? base : `${base || 'file'}.pdf`;
+}
+
+export function fileExpiry(row, now = Date.now()) {
+  const exp = Date.parse(row.expires_at);
+  const expired = !Number.isFinite(exp) || exp <= now;
+  const hours = expired ? 0 : Math.max(1, Math.ceil((exp - now) / 3600000));
+  return {
+    id: row.id,
+    filename: row.filename,
+    size: row.size,
+    kind: row.kind,
+    expires_at: row.expires_at,
+    expired,
+    expires_label: expired ? 'expired' : `expires in ${hours}h`,
+  };
+}
+
+export function webhookFiles(rows) {
+  return rows.map((row) => ({ id: row.id, filename: row.filename, size: row.size, kind: row.kind }));
+}
+
+export function grokFileExpiry(config) {
+  const hours = Number(config.grokFileTtlHours);
+  return new Date(Date.now() + (Number.isFinite(hours) && hours > 0 ? hours : 24) * 3600 * 1000).toISOString();
 }
 
 export function recentContext(rows) {
@@ -127,9 +170,15 @@ function behalf(user, detail) {
   return `Grok (on behalf of ${user.name}): ${detail}`;
 }
 
-export function mountBot(app, { db, config, grokUser }) {
+export function mountBot(app, { db, config, grokUser, grokDir }) {
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, file, cb) => cb(null, grokDir),
+      filename: (req, file, cb) => cb(null, `${crypto.randomBytes(16).toString('hex')}.pdf`),
+    }),
+    limits: { fileSize: PDF_MAX, files: 1 },
+  });
   const router = express.Router();
-  router.use(express.json({ limit: '200kb' }));
   router.use((req, res, next) => {
     if (!config.botApiToken) return json(res, 503, { error: 'Bot API is disabled' });
     const header = String(req.get('authorization') || '');
@@ -137,6 +186,51 @@ export function mountBot(app, { db, config, grokUser }) {
     if (!match || !safeEqual(match[1], config.botApiToken)) return json(res, 401, { error: 'Unauthorized' });
     next();
   });
+  router.use(express.json({ limit: '24mb' }));
+
+  function sendStored(res, row) {
+    if (Date.parse(row.expires_at) <= Date.now()) return json(res, 410, { error: 'File expired' });
+    const root = path.resolve(grokDir);
+    const full = path.resolve(root, row.stored_name);
+    if (!full.startsWith(`${root}${path.sep}`) || !fs.existsSync(full)) return json(res, 404, { error: 'File not found' });
+    const filename = row.filename.replace(/["\r\n]/g, '');
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename.replace(/[^\w.\- ]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+    });
+    res.sendFile(full);
+  }
+
+  function takePdf(req, res, next) {
+    const type = String(req.get('content-type') || '');
+    if (type.includes('multipart/form-data')) {
+      upload.single('file')(req, res, (error) => {
+        if (error) {
+          return json(res, 400, { error: error.code === 'LIMIT_FILE_SIZE' ? 'Each PDF must be 15 MB or smaller.' : 'Could not read that file.' });
+        }
+        if (!req.file) return json(res, 400, { error: 'file is required' });
+        const header = Buffer.alloc(5);
+        const fd = fs.openSync(req.file.path, 'r');
+        try { fs.readSync(fd, header, 0, 5, 0); } finally { fs.closeSync(fd); }
+        if (!isPdf(header)) {
+          fs.rmSync(req.file.path, { force: true });
+          return json(res, 400, { error: 'Only PDF files can be attached.' });
+        }
+        next({ stored: path.basename(req.file.filename), filename: pdfFilename(req.file.originalname), size: req.file.size });
+      });
+      return;
+    }
+    const raw = String(req.body?.data || req.body?.content_base64 || '');
+    if (!raw) return json(res, 400, { error: 'file is required' });
+    const buffer = Buffer.from(raw, 'base64');
+    if (buffer.length > PDF_MAX) return json(res, 400, { error: 'Each PDF must be 15 MB or smaller.' });
+    if (!isPdf(buffer)) return json(res, 400, { error: 'Only PDF files can be attached.' });
+    const stored = `${crypto.randomBytes(16).toString('hex')}.pdf`;
+    fs.writeFileSync(path.join(grokDir, stored), buffer);
+    next({ stored, filename: pdfFilename(req.body.filename), size: buffer.length });
+  }
 
   router.get('/tasks', (req, res) => {
     const assignee = /^\d+$/.test(String(req.query.assignee || '')) ? Number(req.query.assignee) : (req.query.assignee === 'none' ? 'none' : null);
@@ -269,6 +363,7 @@ export function mountBot(app, { db, config, grokUser }) {
     if (!body) return json(res, 400, { error: 'body is required' });
     const grok = grokUser();
     const commentId = addComment(db, { taskId: task.id, authorId: grok.id, body });
+    bindLooseGrokCommentFiles(db, task.id, commentId);
     const ids = activeUserIds(db, mentionedUserIds(body, listActiveUsers(db)));
     setCommentMentions(db, commentId, ids.filter((id) => id !== grok.id));
     addActivity(db, { taskId: task.id, actorId: grok.id, action: 'comment', detail: behalf(actor, 'Added a comment') });
@@ -285,6 +380,65 @@ export function mountBot(app, { db, config, grokUser }) {
     if (!text) return json(res, 400, { error: 'text is required' });
     completeGrokReply(db, thread.id, { requestId: String(req.body.request_id || ''), text });
     json(res, 200, { ok: true, thread_id: thread.id });
+  });
+
+  router.get('/files/:id', (req, res) => {
+    const row = getGrokFile(db, Number(req.params.id));
+    if (!row) return json(res, 404, { error: 'File not found' });
+    sendStored(res, row);
+  });
+
+  router.post('/chat/:threadId/files', (req, res) => {
+    takePdf(req, res, (file) => {
+      const actor = actingUser(db, req, res);
+      if (!actor) return fs.rmSync(path.join(grokDir, file.stored), { force: true });
+      const thread = getGrokThread(db, Number(req.params.threadId));
+      if (!thread) {
+        fs.rmSync(path.join(grokDir, file.stored), { force: true });
+        return json(res, 404, { error: 'Thread not found' });
+      }
+      if (thread.user_id !== actor.id) {
+        fs.rmSync(path.join(grokDir, file.stored), { force: true });
+        return json(res, 403, { error: 'That person does not own this thread' });
+      }
+      const row = addGrokFile(db, {
+        ownerUserId: actor.id,
+        threadId: thread.id,
+        messageId: latestGrokMessageId(db, thread.id, String(req.body.request_id || '')),
+        kind: 'out',
+        filename: file.filename,
+        storedName: file.stored,
+        size: file.size,
+        expiresAt: grokFileExpiry(config),
+      });
+      json(res, 201, { file: { id: row.id, filename: row.filename, size: row.size, kind: row.kind } });
+    });
+  });
+
+  router.post('/tasks/:id/files', (req, res) => {
+    takePdf(req, res, (file) => {
+      const actor = actingUser(db, req, res);
+      if (!actor) return fs.rmSync(path.join(grokDir, file.stored), { force: true });
+      const task = getTask(db, Number(req.params.id));
+      if (!task) {
+        fs.rmSync(path.join(grokDir, file.stored), { force: true });
+        return json(res, 404, { error: 'Task not found' });
+      }
+      const grok = grokUser();
+      const commentId = latestGrokCommentId(db, task.id, grok.id);
+      const row = addGrokFile(db, {
+        ownerUserId: actor.id,
+        taskId: task.id,
+        commentId,
+        kind: 'out',
+        filename: file.filename,
+        storedName: file.stored,
+        size: file.size,
+        expiresAt: grokFileExpiry(config),
+      });
+      addActivity(db, { taskId: task.id, actorId: grok.id, action: 'attachment', detail: behalf(actor, `Attached ${row.filename}`) });
+      json(res, 201, { file: { id: row.id, filename: row.filename, size: row.size, kind: row.kind, comment_id: commentId } });
+    });
   });
 
   router.post('/complete/:id', (req, res) => {

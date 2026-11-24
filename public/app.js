@@ -267,16 +267,37 @@ if (grokRoot) {
   const bubble = grokRoot.querySelector('.grok-bubble');
   const panel = grokRoot.querySelector('.grok-panel');
   const log = grokRoot.querySelector('[data-grok-log]');
+  const list = grokRoot.querySelector('[data-grok-list]');
   const form = grokRoot.querySelector('[data-grok-form]');
+  const picked = grokRoot.querySelector('[data-grok-picked]');
+  const fileInput = form.querySelector('input[type="file"]');
   const csrf = grokRoot.dataset.csrf || '';
   let timer = 0;
   let pending = false;
   let open = false;
+  let listOpen = false;
   let connected = true;
+  let threadId = null;
+  let chosen = [];
+
+  function fileNode(file) {
+    const line = document.createElement('p');
+    line.className = 'grok-file';
+    if (file.expired) {
+      line.textContent = `${file.filename} · expired`;
+      return line;
+    }
+    const link = document.createElement('a');
+    link.href = `/files/${file.id}`;
+    link.textContent = file.filename;
+    line.append(link, document.createTextNode(` · ${file.expires_label}`));
+    return line;
+  }
 
   function paint(state) {
     pending = Boolean(state.pending);
     connected = state.connected !== false;
+    threadId = state.thread_id || null;
     log.innerHTML = '';
     if (!state.connected) {
       const note = document.createElement('p');
@@ -285,12 +306,17 @@ if (grokRoot) {
       log.append(note);
     }
     (state.messages || []).forEach((message) => {
-      if (message.status === 'pending' && !message.body) return;
-      const line = document.createElement('p');
-      line.className = message.role === 'user' ? 'grok-mine' : 'grok-theirs';
-      line.textContent = message.body;
-      log.append(line);
+      if (message.body || (message.files || []).length) {
+        if (message.body) {
+          const line = document.createElement('p');
+          line.className = message.role === 'user' ? 'grok-mine' : 'grok-theirs';
+          line.textContent = message.body;
+          log.append(line);
+        }
+        (message.files || []).forEach((file) => log.append(fileNode(file)));
+      }
     });
+    (state.files || []).forEach((file) => log.append(fileNode(file)));
     if (pending) {
       const wait = document.createElement('p');
       wait.className = 'grok-wait';
@@ -298,10 +324,54 @@ if (grokRoot) {
       log.append(wait);
     }
     log.scrollTop = log.scrollHeight;
+    list.innerHTML = '';
+    (state.threads || []).forEach((thread) => {
+      const row = document.createElement('div');
+      row.className = `grok-chat${thread.id === threadId ? ' is-current' : ''}`;
+      const title = document.createElement('input');
+      title.value = thread.title || '';
+      title.placeholder = 'New chat';
+      title.setAttribute('aria-label', 'Chat title');
+      title.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); title.blur(); }
+      });
+      title.addEventListener('change', () => renameThread(thread.id, title.value));
+      const openChat = document.createElement('button');
+      openChat.type = 'button';
+      openChat.textContent = 'Open';
+      openChat.addEventListener('click', () => { switchThread(thread.id); toggleList(false); });
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Delete';
+      remove.addEventListener('click', () => deleteThread(thread.id));
+      row.append(title, openChat, remove);
+      list.append(row);
+    });
+    if (!(state.threads || []).length) {
+      const empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = 'No chats yet.';
+      list.append(empty);
+    }
   }
 
-  async function load() {
-    const response = await fetch('/api/grok', { headers: { accept: 'application/json' } });
+  function showPicked() {
+    picked.innerHTML = '';
+    chosen.forEach((file, index) => {
+      const chip = document.createElement('span');
+      chip.textContent = file.name;
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.textContent = '×';
+      drop.addEventListener('click', () => { chosen.splice(index, 1); showPicked(); });
+      chip.append(drop);
+      picked.append(chip);
+    });
+  }
+
+  async function load(id = threadId) {
+    const query = id ? `?thread=${id}` : '';
+    const response = await fetch(`/api/grok${query}`, { headers: { accept: 'application/json' } });
     if (!response.ok) return;
     paint(await response.json());
   }
@@ -313,6 +383,42 @@ if (grokRoot) {
     timer = window.setInterval(() => { load().catch(() => {}); }, 3000);
   }
 
+  function toggleList(force) {
+    listOpen = typeof force === 'boolean' ? force : !listOpen;
+    list.hidden = false;
+    list.classList.toggle('is-open', listOpen);
+    if (!listOpen) list.hidden = true;
+  }
+
+  async function switchThread(id) {
+    threadId = id;
+    await load(id);
+    watch();
+  }
+
+  async function renameThread(id, title) {
+    const response = await fetch(`/api/grok/threads/${id}/rename`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: csrf, title }),
+    });
+    if (response.ok) paint(await response.json());
+  }
+
+  async function deleteThread(id) {
+    if (!window.confirm('Delete this chat?')) return;
+    const response = await fetch(`/api/grok/threads/${id}/delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: csrf }),
+    });
+    if (!response.ok) return;
+    const state = await response.json();
+    threadId = state.thread_id;
+    paint(state);
+    watch();
+  }
+
   bubble.addEventListener('click', () => {
     open = true;
     panel.hidden = false;
@@ -321,28 +427,52 @@ if (grokRoot) {
   grokRoot.querySelector('[data-grok-close]').addEventListener('click', () => {
     open = false;
     panel.hidden = true;
+    toggleList(false);
     watch();
+  });
+  grokRoot.querySelector('[data-grok-chats]').addEventListener('click', () => toggleList());
+  grokRoot.querySelector('[data-grok-new]').addEventListener('click', async () => {
+    const response = await fetch('/api/grok/threads', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: csrf }),
+    });
+    if (!response.ok) return;
+    paint(await response.json());
+    toggleList(false);
+    watch();
+  });
+  fileInput.addEventListener('change', () => {
+    chosen = chosen.concat([...fileInput.files]).slice(0, 5);
+    fileInput.value = '';
+    showPicked();
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const input = form.querySelector('input');
+    const input = form.querySelector('input[name="text"]');
     const text = input.value.trim();
-    if (!text) return;
+    if (!text && !chosen.length) return;
     input.value = '';
-    const mine = document.createElement('p');
-    mine.className = 'grok-mine';
-    mine.textContent = text;
-    log.append(mine);
+    const sending = chosen;
+    chosen = [];
+    showPicked();
+    if (text) {
+      const mine = document.createElement('p');
+      mine.className = 'grok-mine';
+      mine.textContent = text;
+      log.append(mine);
+    }
     const wait = document.createElement('p');
     wait.className = 'grok-wait';
     wait.textContent = connected ? 'Grok is thinking…' : "Grok isn't connected yet";
     log.append(wait);
     log.scrollTop = log.scrollHeight;
-    const response = await fetch('/api/grok', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-      body: new URLSearchParams({ _csrf: csrf, text }),
-    });
+    const body = new FormData();
+    body.set('_csrf', csrf);
+    body.set('text', text);
+    if (threadId) body.set('thread_id', String(threadId));
+    sending.forEach((file) => body.append('files', file));
+    const response = await fetch('/api/grok', { method: 'POST', headers: { accept: 'application/json' }, body });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       wait.className = 'grok-note';

@@ -4,6 +4,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
+import { openDatabase } from '../src/db.js';
 import { createApp } from '../src/server.js';
 
 function jar() {
@@ -259,4 +261,190 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     offListen.server.close();
     hook.close();
   }
+});
+
+test('several grok chats and pdf files', { timeout: 60000 }, async () => {
+  const hits = [];
+  const hook = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => { hits.push({ body: JSON.parse(body || '{}') }); res.end('ok'); });
+  });
+  await new Promise((resolve) => hook.listen(0, '127.0.0.1', resolve));
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-grok-files-'));
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'board.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+    grokWebhookUrl: `http://127.0.0.1:${hook.address().port}/hook`,
+    botApiToken: 'test-bot-token',
+    grokDailyLimit: 100,
+    grokHourlyLimit: 20,
+    grokFileTtlHours: 24,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const home = await page(base, admin, '/');
+    assert.match(home.text, /data-grok-new/);
+    const first = await fetch(`${base}/api/grok`, {
+      method: 'POST',
+      headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: home.csrf, text: 'Alpha chat about the roof quote and the extra words' }),
+    });
+    const alpha = await first.json();
+    assert.equal(alpha.title, 'Alpha chat about the roof quote and the');
+    const created = await fetch(`${base}/api/grok/threads`, {
+      method: 'POST',
+      headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: home.csrf }),
+    });
+    const fresh = await created.json();
+    assert.equal(fresh.title, '');
+    assert.notEqual(fresh.thread_id, alpha.thread_id);
+    const second = await fetch(`${base}/api/grok`, {
+      method: 'POST',
+      headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: home.csrf, thread_id: String(fresh.thread_id), text: 'Beta follow up' }),
+    });
+    const beta = await second.json();
+    assert.equal(beta.threads[0].id, fresh.thread_id);
+    const renamed = await fetch(`${base}/api/grok/threads/${alpha.thread_id}/rename`, {
+      method: 'POST',
+      headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: home.csrf, title: 'Roof quote' }),
+    });
+    assert.equal((await renamed.json()).threads.find((thread) => thread.id === alpha.thread_id).title, 'Roof quote');
+    const removed = await fetch(`${base}/api/grok/threads/${fresh.thread_id}/delete`, {
+      method: 'POST',
+      headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: home.csrf }),
+    });
+    const afterDelete = await removed.json();
+    assert.equal(afterDelete.threads.some((thread) => thread.id === fresh.thread_id), false);
+
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n');
+    const form = new FormData();
+    form.set('_csrf', home.csrf);
+    form.set('text', 'See the quote');
+    form.set('thread_id', String(alpha.thread_id));
+    form.append('files', new Blob([pdf], { type: 'application/pdf' }), 'quote.pdf');
+    const sent = await fetch(`${base}/api/grok`, { method: 'POST', headers: { cookie: admin.header(), accept: 'application/json' }, body: form });
+    const chat = await sent.json();
+    assert.equal(sent.status, 200);
+    assert.equal(chat.messages.find((message) => message.body === 'See the quote').files[0].filename, 'quote.pdf');
+    assert.match(chat.messages.find((message) => message.body === 'See the quote').files[0].expires_label, /expires in \d+h/);
+    let posted;
+    const pdfWait = Date.now();
+    while (Date.now() - pdfWait < 4000) {
+      posted = hits.find((hit) => hit.body.text === 'See the quote');
+      if (posted) break;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.equal(posted.body.files[0].kind, 'in');
+    assert.equal(posted.body.thread_id, alpha.thread_id);
+    const fileId = posted.body.files[0].id;
+    const download = await fetch(`${base}/files/${fileId}`, { headers: { cookie: admin.header() } });
+    assert.equal(download.status, 200);
+    assert.equal(Buffer.from(await download.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+
+    const users = await page(base, admin, '/users');
+    await post(base, admin, '/users', {
+      _csrf: users.csrf, name: 'Lindi Nkosi', email: 'lindi@example.com', password: 'lindi-password', role: 'user',
+    });
+    const lindi = await login(base, 'lindi@example.com', 'lindi-password');
+    const denied = await fetch(`${base}/files/${fileId}`, { headers: { cookie: lindi.header() } });
+    assert.equal(denied.status, 403);
+    const fake = new FormData();
+    fake.set('_csrf', home.csrf);
+    fake.set('text', 'Not a pdf');
+    fake.set('thread_id', String(alpha.thread_id));
+    fake.append('files', new Blob(['hello']), 'notes.pdf');
+    const rejected = await fetch(`${base}/api/grok`, { method: 'POST', headers: { cookie: admin.header(), accept: 'application/json' }, body: fake });
+    assert.equal(rejected.status, 400);
+
+    const arshadId = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
+    const replyPdf = Buffer.from('%PDF-1.4\nreply\n%%EOF\n').toString('base64');
+    const uploaded = await fetch(`${base}/api/bot/chat/${alpha.thread_id}/files`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshadId, filename: 'answer.pdf', data: replyPdf, request_id: posted.body.request_id }),
+    });
+    assert.equal(uploaded.status, 201);
+    const shown = await (await fetch(`${base}/api/grok?thread=${alpha.thread_id}`, { headers: { cookie: admin.header(), accept: 'application/json' } })).json();
+    const attached = [...shown.messages, { files: shown.files }].some((message) => (message.files || []).some((file) => file.filename === 'answer.pdf'));
+    assert.equal(attached, true);
+    const botFile = await fetch(`${base}/api/bot/files/${fileId}`, { headers: { authorization: 'Bearer test-bot-token' } });
+    assert.equal(botFile.status, 200);
+
+    const taskForm = await page(base, admin, '/tasks/new');
+    const task = await post(base, admin, '/tasks', { _csrf: taskForm.csrf, title: 'Fan', status: 'todo' });
+    const taskId = Number(task.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    const taskPage = await page(base, lindi, `/tasks/${taskId}`);
+    const comment = new FormData();
+    comment.set('_csrf', taskPage.csrf);
+    comment.set('body', `@[Grok](${db.prepare("SELECT id FROM users WHERE email = 'grok@taskboard.local'").get().id}) the drawing`);
+    comment.append('files', new Blob([pdf], { type: 'application/pdf' }), 'drawing.pdf');
+    const commented = await fetch(`${base}/tasks/${taskId}/comments`, {
+      method: 'POST', redirect: 'manual', headers: { cookie: lindi.header() }, body: comment,
+    });
+    assert.equal(commented.status, 302);
+    let commentHit;
+    const commentWait = Date.now();
+    while (Date.now() - commentWait < 4000) {
+      commentHit = hits.find((hit) => hit.body.type === 'comment');
+      if (commentHit) break;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    assert.equal(commentHit.body.files[0].filename, 'drawing.pdf');
+    const shared = await fetch(`${base}/files/${commentHit.body.files[0].id}`, { headers: { cookie: admin.header() } });
+    assert.equal(shared.status, 200);
+    const pageHtml = await page(base, lindi, `/tasks/${taskId}`);
+    assert.match(pageHtml.text, /drawing\.pdf/);
+    assert.match(pageHtml.text, /expires in/);
+
+    db.prepare("UPDATE grok_files SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(fileId);
+    const gone = await fetch(`${base}/files/${fileId}`, { headers: { cookie: admin.header() } });
+    assert.equal(gone.status, 410);
+    app.locals.purgeGrokFiles();
+    assert.equal(db.prepare('SELECT id FROM grok_files WHERE id = ?').get(fileId), undefined);
+  } finally {
+    server.close();
+    hook.close();
+  }
+});
+
+test('old grok threads lose the one-chat unique constraint', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-grok-migrate-'));
+  const file = path.join(dir, 'old.sqlite');
+  const raw = new Database(file);
+  raw.exec(`
+    CREATE TABLE grok_threads (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO grok_threads (user_id, created_at, updated_at)
+      VALUES (1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+  `);
+  raw.close();
+  const db = openDatabase(file);
+  const names = db.prepare('PRAGMA table_info(grok_threads)').all().map((column) => column.name);
+  assert.equal(names.includes('title'), true);
+  const now = '2026-01-02T00:00:00.000Z';
+  db.prepare(`
+    INSERT INTO users (id, email, name, password_hash, role, active, created_at, updated_at)
+    VALUES (1, 'a@example.com', 'A', 'x', 'user', 1, ?, ?)
+  `).run(now, now);
+  db.prepare('INSERT INTO grok_threads (user_id, title, created_at, updated_at) VALUES (1, ?, ?, ?)').run('', now, now);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM grok_threads').get().n, 2);
+  db.close();
 });

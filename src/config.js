@@ -23,6 +23,7 @@ export function readConfig(env = process.env) {
     botApiToken: String(env.BOT_API_TOKEN || ''),
     grokDailyLimit: Number(env.GROK_DAILY_LIMIT || 100),
     grokHourlyLimit: Number(env.GROK_HOURLY_LIMIT || 20),
+    grokFileTtlHours: Number(env.GROK_FILE_TTL_HOURS || 24),
   };
 }
 

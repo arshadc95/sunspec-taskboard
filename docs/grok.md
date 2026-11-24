@@ -14,6 +14,7 @@ No tokens belong in the repository. Set them in the server `.env` only.
 | `BOT_API_TOKEN` | Bearer token for `/api/bot`. Empty disables the API (HTTP 503). Example: `replace-with-a-long-random-string` |
 | `GROK_DAILY_LIMIT` | Messages per person per 24 hours. Default `100`. |
 | `GROK_HOURLY_LIMIT` | Optional. Messages per person per hour. Default `20`. |
+| `GROK_FILE_TTL_HOURS` | How long a Grok PDF is kept. Default `24`. Expired files are deleted by an hourly cleanup in the app process. |
 
 Each chat message and each `@Grok` comment counts as one request. Over the limit, the person sees a short message and nothing is posted.
 
@@ -30,6 +31,9 @@ Chat:
   "user": { "id": 4, "name": "Lindi Nkosi", "role": "user" },
   "text": "What is due today?",
   "thread_id": 4,
+  "files": [
+    { "id": 9, "filename": "quote.pdf", "size": 48211, "kind": "in" }
+  ],
   "recent_context": [
     { "role": "user", "text": "What is due today?", "at": "2026-11-24T12:00:00.000Z" }
   ],
@@ -52,6 +56,7 @@ Comment (`thread_id` is omitted; `task` is included):
     "assignee": "Thabang Madikgetla",
     "due": "2026-11-25"
   },
+  "files": [],
   "recent_context": [
     { "role": "Lindi Nkosi", "text": "@[Grok](1) can you mark this done?", "at": "2026-11-24T12:00:00.000Z" }
   ],
@@ -59,7 +64,9 @@ Comment (`thread_id` is omitted; `task` is included):
 }
 ```
 
-`recent_context` is the last 10 messages. Chat roles are `user` or `grok`. Comment roles are the author's name.
+`recent_context` is the last 10 messages. Chat roles are `user` or `grok`. Comment roles are the author's name. `files` lists PDFs attached to that message. `thread_id` is the chat. A person can keep several chats; the first message's first 40 characters becomes the title until they rename it.
+
+PDFs are checked by the `%PDF` magic bytes, not the browser's file type. At most 5 files, 15 MB each. They are stored under `DATA_DIR/grok-files` with a random name. The row records `stored_name`, and `message_id` or `comment_id`, so the file can be downloaded and shown on the reply. Those two columns are how the file is found; they are not part of the webhook.
 
 Reply to a chat with `POST /api/bot/chat/:thread_id/reply` and the same `request_id`. Reply to a comment with `POST /api/bot/tasks/:id/comments`.
 
@@ -101,7 +108,23 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
 curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"acting_user_id":4}' \
   "$BASE/api/bot/complete/18"
+
+curl -s -H "Authorization: Bearer $TOKEN" -o quote.pdf "$BASE/api/bot/files/9"
+
+curl -s -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"acting_user_id":4,"filename":"answer.pdf","data":"JVBERi0xLjQK"}' \
+  "$BASE/api/bot/chat/4/files"
+
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -F "acting_user_id=4" -F "file=@answer.pdf;type=application/pdf" \
+  "$BASE/api/bot/tasks/18/files"
 ```
+
+`data` is the PDF as base64. A multipart upload uses the field name `file`. Either way the file is attached to the latest Grok reply in that chat, or the latest Grok comment on that task. `GET /api/bot/files/:id` downloads it until `GROK_FILE_TTL_HOURS` has passed.
+
+Signed-in people download their own chat files, and any PDF on a task they can open, at `/files/:id`.
+
+Nginx in front of the app must allow the upload: `client_max_body_size 80m`. Update the file that is actually enabled on the VPS, then reload nginx. The copies in `deploy/` already say 80m.
 
 `PATCH` accepts `title`, `description`, `assignee_id`, `status`, `priority`, `due` or `due_date`, and `project` or `project_id`.
 

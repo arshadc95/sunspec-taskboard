@@ -133,10 +133,13 @@ function migrate(db) {
 
     CREATE TABLE IF NOT EXISTS grok_threads (
       id INTEGER PRIMARY KEY,
-      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_grok_threads_user ON grok_threads(user_id, updated_at);
 
     CREATE TABLE IF NOT EXISTS grok_messages (
       id INTEGER PRIMARY KEY,
@@ -157,6 +160,25 @@ function migrate(db) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_grok_requests_user ON grok_requests(user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS grok_files (
+      id INTEGER PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id),
+      thread_id INTEGER REFERENCES grok_threads(id) ON DELETE CASCADE,
+      task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+      message_id INTEGER,
+      comment_id INTEGER,
+      kind TEXT NOT NULL CHECK (kind IN ('in', 'out')),
+      filename TEXT NOT NULL,
+      stored_name TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_grok_files_thread ON grok_files(thread_id);
+    CREATE INDEX IF NOT EXISTS idx_grok_files_task ON grok_files(task_id);
+    CREATE INDEX IF NOT EXISTS idx_grok_files_expires ON grok_files(expires_at);
 
     CREATE TABLE IF NOT EXISTS kudos (
       id INTEGER PRIMARY KEY,
@@ -179,6 +201,33 @@ function migrate(db) {
   if (!userColumns.some((column) => column.name === 'is_bot')) {
     db.exec('ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0');
   }
+  relaxGrokThreads(db);
+}
+
+function relaxGrokThreads(db) {
+  const columns = db.prepare('PRAGMA table_info(grok_threads)').all();
+  if (!columns.length) return;
+  const hasTitle = columns.some((column) => column.name === 'title');
+  const unique = db.prepare('PRAGMA index_list(grok_threads)').all()
+    .some((index) => index.unique && index.origin === 'u');
+  if (hasTitle && !unique) return;
+  const titleSql = hasTitle ? "COALESCE(title, '')" : "''";
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec(`
+    CREATE TABLE grok_threads_next (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      title TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO grok_threads_next (id, user_id, title, created_at, updated_at)
+      SELECT id, user_id, ${titleSql}, created_at, updated_at FROM grok_threads;
+    DROP TABLE grok_threads;
+    ALTER TABLE grok_threads_next RENAME TO grok_threads;
+    CREATE INDEX IF NOT EXISTS idx_grok_threads_user ON grok_threads(user_id, updated_at);
+  `);
+  db.exec('PRAGMA foreign_keys = ON');
 }
 
 export function userCount(db) {
@@ -1011,12 +1060,43 @@ export function ensureGrokUser(db) {
   return getUser(db, Number(info.lastInsertRowid));
 }
 
-export function getOrCreateGrokThread(db, userId) {
-  const existing = db.prepare('SELECT * FROM grok_threads WHERE user_id = ?').get(userId);
-  if (existing) return existing;
+export function listGrokThreads(db, userId) {
+  return db.prepare('SELECT * FROM grok_threads WHERE user_id = ? ORDER BY updated_at DESC, id DESC').all(userId);
+}
+
+export function createGrokThread(db, userId) {
   const now = new Date().toISOString();
-  const info = db.prepare('INSERT INTO grok_threads (user_id, created_at, updated_at) VALUES (?, ?, ?)').run(userId, now, now);
-  return db.prepare('SELECT * FROM grok_threads WHERE id = ?').get(Number(info.lastInsertRowid));
+  const info = db.prepare('INSERT INTO grok_threads (user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)').run(userId, '', now, now);
+  return getGrokThread(db, Number(info.lastInsertRowid));
+}
+
+export function latestGrokThread(db, userId) {
+  return db.prepare('SELECT * FROM grok_threads WHERE user_id = ? ORDER BY updated_at DESC, id DESC').get(userId) || null;
+}
+
+export function renameGrokThread(db, threadId, userId, title) {
+  const thread = getGrokThread(db, threadId);
+  if (!thread || thread.user_id !== userId) return null;
+  const clean = String(title || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (!clean) return thread;
+  const now = new Date().toISOString();
+  db.prepare('UPDATE grok_threads SET title = ?, updated_at = ? WHERE id = ?').run(clean, now, threadId);
+  return getGrokThread(db, threadId);
+}
+
+export function nameGrokThreadFromMessage(db, threadId, text) {
+  const title = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 40).trim();
+  if (!title) return;
+  db.prepare("UPDATE grok_threads SET title = ? WHERE id = ? AND title = ''").run(title, threadId);
+}
+
+export function deleteGrokThread(db, threadId, userId) {
+  const thread = getGrokThread(db, threadId);
+  if (!thread || thread.user_id !== userId) return null;
+  const files = db.prepare('SELECT stored_name FROM grok_files WHERE thread_id = ?').all(threadId);
+  db.prepare('DELETE FROM grok_files WHERE thread_id = ?').run(threadId);
+  db.prepare('DELETE FROM grok_threads WHERE id = ?').run(threadId);
+  return files;
 }
 
 export function listGrokMessages(db, threadId) {
@@ -1043,12 +1123,16 @@ export function completeGrokReply(db, threadId, { requestId, text }) {
   const pending = requestId
     ? db.prepare("SELECT id FROM grok_messages WHERE thread_id = ? AND request_id = ? AND role = 'grok' AND status = 'pending'").get(threadId, requestId)
     : db.prepare("SELECT id FROM grok_messages WHERE thread_id = ? AND role = 'grok' AND status = 'pending' ORDER BY id DESC").get(threadId);
+  let messageId;
   if (pending) {
     db.prepare("UPDATE grok_messages SET body = ?, status = 'complete' WHERE id = ?").run(text, pending.id);
+    messageId = pending.id;
   } else {
-    addGrokMessage(db, { threadId, role: 'grok', body: text, requestId, status: 'complete' });
+    messageId = addGrokMessage(db, { threadId, role: 'grok', body: text, requestId, status: 'complete' });
   }
+  db.prepare("UPDATE grok_files SET message_id = ? WHERE thread_id = ? AND kind = 'out' AND message_id IS NULL").run(messageId, threadId);
   db.prepare('UPDATE grok_threads SET updated_at = ? WHERE id = ?').run(now, threadId);
+  return messageId;
 }
 
 export function getGrokThread(db, threadId) {
@@ -1062,4 +1146,60 @@ export function countGrokRequests(db, userId, sinceMs) {
 export function recordGrokRequest(db, userId) {
   db.prepare('INSERT INTO grok_requests (user_id, created_at) VALUES (?, ?)').run(userId, Date.now());
   db.prepare('DELETE FROM grok_requests WHERE created_at < ?').run(Date.now() - 48 * 60 * 60 * 1000);
+}
+
+export function addGrokFile(db, fields) {
+  const now = new Date().toISOString();
+  const info = db.prepare(`
+    INSERT INTO grok_files (
+      owner_user_id, thread_id, task_id, message_id, comment_id, kind, filename, stored_name, size, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    fields.ownerUserId,
+    fields.threadId || null,
+    fields.taskId || null,
+    fields.messageId || null,
+    fields.commentId || null,
+    fields.kind,
+    fields.filename,
+    fields.storedName,
+    fields.size,
+    now,
+    fields.expiresAt,
+  );
+  return getGrokFile(db, Number(info.lastInsertRowid));
+}
+
+export function getGrokFile(db, id) {
+  return db.prepare('SELECT * FROM grok_files WHERE id = ?').get(id) || null;
+}
+
+export function listGrokFiles(db, { threadId = null, taskId = null } = {}) {
+  if (threadId) return db.prepare('SELECT * FROM grok_files WHERE thread_id = ? ORDER BY id').all(threadId);
+  if (taskId) return db.prepare('SELECT * FROM grok_files WHERE task_id = ? ORDER BY id').all(taskId);
+  return [];
+}
+
+export function latestGrokMessageId(db, threadId, requestId) {
+  if (requestId) {
+    const match = db.prepare("SELECT id FROM grok_messages WHERE thread_id = ? AND request_id = ? AND role = 'grok' ORDER BY id DESC").get(threadId, requestId);
+    if (match) return match.id;
+  }
+  return db.prepare("SELECT id FROM grok_messages WHERE thread_id = ? AND role = 'grok' ORDER BY id DESC").get(threadId)?.id || null;
+}
+
+export function latestGrokCommentId(db, taskId, grokUserId) {
+  return db.prepare('SELECT id FROM comments WHERE task_id = ? AND author_id = ? ORDER BY id DESC').get(taskId, grokUserId)?.id || null;
+}
+
+export function bindLooseGrokCommentFiles(db, taskId, commentId) {
+  db.prepare("UPDATE grok_files SET comment_id = ? WHERE task_id = ? AND kind = 'out' AND comment_id IS NULL").run(commentId, taskId);
+}
+
+export function listExpiredGrokFiles(db, nowIso) {
+  return db.prepare('SELECT id, stored_name FROM grok_files WHERE expires_at <= ?').all(nowIso);
+}
+
+export function deleteGrokFileRow(db, id) {
+  db.prepare('DELETE FROM grok_files WHERE id = ?').run(id);
 }

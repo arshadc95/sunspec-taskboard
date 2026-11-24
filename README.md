@@ -49,6 +49,8 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+Grok PDFs need `client_max_body_size 80m`. If this site is already installed, edit the live nginx file (not only the copy in the repo) and reload nginx.
+
 `npm run create-superuser` reads `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` from `.env`. You can also pass them on the command line:
 
 ```bash
@@ -83,7 +85,7 @@ sudo systemctl reload nginx
 sudo certbot --nginx -d tasks.sunspec.co.za
 ```
 
-The site is then at https://tasks.sunspec.co.za. nginx sends `X-Forwarded-Proto`, and the session cookie is `Secure` on that HTTPS host. The port 8090 site can stay up for HTTP access.
+The site is then at https://tasks.sunspec.co.za. nginx sends `X-Forwarded-Proto`, and the session cookie is `Secure` on that HTTPS host. The port 8090 site can stay up for HTTP access. Both nginx files set `client_max_body_size 80m`. If the domain is already live, change that value in the enabled file and reload nginx.
 
 ## Update
 

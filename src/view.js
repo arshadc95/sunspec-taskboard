@@ -12,7 +12,7 @@ const ICONS = {
   team: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6M16 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6M3 20a5 5 0 0 1 10 0M13 20a5 5 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
-const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig', 'notimer', 'grokoff', 'groklimit']);
+const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig', 'notimer', 'grokoff', 'groklimit', 'grokfile']);
 
 export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -93,6 +93,8 @@ function banner(msg) {
     toobig: 'That file is larger than 10 MB.',
     grokoff: "Grok isn't connected yet. The comment was saved.",
     groklimit: 'Grok is catching up. You can send 20 messages an hour, and the daily limit after that. The comment was saved.',
+    grokpdf: 'The comment was saved. PDFs are only sent when the comment mentions Grok.',
+    grokfile: 'Each PDF must be a real PDF, 15 MB or smaller, and only five at a time.',
   }[msg];
   if (!text) return '';
   return `<div class="banner ${BAD_MSGS.has(msg) ? 'bad' : 'ok'}">${esc(text)}</div>`;
@@ -113,6 +115,15 @@ function peopleScript(users) {
   return `<script type="application/json" id="people-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
 }
 
+function fileLinks(files) {
+  if (!files?.length) return '';
+  return `<ul class="file-list">${files.map((file) => (
+    file.expired
+      ? `<li>${esc(file.filename)} <span class="hint">expired</span></li>`
+      : `<li><a href="/files/${file.id}">${esc(file.filename)}</a> <span class="hint">${esc(file.expires_label)}</span></li>`
+  )).join('')}</ul>`;
+}
+
 function grokWidget(user, csrf) {
   return `<div class="grok" data-grok data-csrf="${esc(csrf)}">
     <button type="button" class="grok-bubble" aria-label="Open Grok" title="Grok">
@@ -120,13 +131,20 @@ function grokWidget(user, csrf) {
     </button>
     <section class="grok-panel" hidden>
       <header class="grok-head">
+        <button type="button" data-grok-chats>Chats</button>
         <strong>Grok</strong>
+        <button type="button" data-grok-new>+ New chat</button>
         <button type="button" data-grok-close aria-label="Close">×</button>
       </header>
+      <div class="grok-chats" data-grok-list hidden></div>
       <div class="grok-log" data-grok-log></div>
       <form class="grok-form" data-grok-form>
-        <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
-        <button type="submit">Send</button>
+        <div class="grok-picked" data-grok-picked></div>
+        <div class="grok-compose">
+          <label class="grok-attach">PDF<input type="file" accept="application/pdf,.pdf" multiple hidden></label>
+          <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
+          <button type="submit">Send</button>
+        </div>
       </form>
     </section>
   </div>
@@ -518,7 +536,7 @@ function kudosButton({ csrf, type, id, count = 0, mine = false, back }) {
   </form>`;
 }
 
-export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
+export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], grokFiles = [], timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
@@ -535,6 +553,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
           <article class="comment">
             <header><strong>${esc(comment.author_name)}</strong> <time>${esc(formatDateTime(comment.created_at))}</time></header>
             <div class="comment-body">${highlightMentions(comment.body, users)}</div>
+            ${fileLinks(comment.files)}
             ${kudosButton({
               csrf,
               type: 'comment',
@@ -549,11 +568,16 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
             </form>` : ''}
           </article>
         `).join('') : '<p class="hint">No comments yet.</p>'}
-        <form class="stack" method="post" action="/tasks/${task.id}/comments">
+        ${fileLinks(grokFiles)}
+        <form class="stack" method="post" action="/tasks/${task.id}/comments" enctype="multipart/form-data">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <label class="field"><span>Add a comment</span>
             <textarea name="body" data-mentions rows="3" required maxlength="8000" placeholder="Add a comment. Type @ to mention someone."></textarea>
           </label>
+          <label class="field"><span>PDF for Grok</span>
+            <input type="file" name="files" accept="application/pdf,.pdf" multiple>
+          </label>
+          <p class="hint">Up to 5 PDFs, 15 MB each. They are sent only when the comment mentions Grok, and they expire after a day.</p>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Comment</button></div>
         </form>
       </section>`;
