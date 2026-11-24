@@ -72,9 +72,12 @@ test('a team card lists the next three due tasks and the colour', () => {
   assert.equal(adaRow.more, 2);
   assert.equal(adaRow.load, 100);
   assert.match(html, /swatch c-/);
-  assert.match(html, /Open<\/span><strong>5<\/strong>/);
-  assert.match(html, /class="hot"[\s\S]*?<span>Overdue<\/span><strong>1<\/strong>/);
-  assert.match(html, /Done this month<\/span><strong>1<\/strong>/);
+  assert.match(html, /<span>Open<\/span>/);
+  assert.match(html, /<strong>5<\/strong>/);
+  assert.match(html, /<span>Overdue<\/span>/);
+  assert.match(html, /<strong class="hot">1<\/strong>/);
+  assert.match(html, /title="Done this month">Done<\/span>/);
+  assert.match(html, /<strong>1<\/strong>/);
   assert.match(html, /class="w-100"/);
   assert.doesNotMatch(html, / style=/);
   assert.match(html, /href="\/tasks\/\d+">Overdue meter</);

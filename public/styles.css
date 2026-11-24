@@ -902,11 +902,28 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .person-card h2 { margin: 0; padding: 10px 12px; background: #000; color: #fff; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
 .person-card h2 .badge { margin-left: auto; }
 .person-card h2 .role-superuser { border: 1px solid #fff; }
-.person-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 12px; }
-.person-nums div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.person-nums span { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #555; }
+.person-nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 14px auto;
+  column-gap: 8px;
+  row-gap: 4px;
+  align-items: baseline;
+  padding: 12px;
+}
+.person-nums span {
+  height: 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 14px;
+  text-transform: uppercase;
+  color: #555;
+  white-space: nowrap;
+  overflow: hidden;
+}
 .person-nums strong { font-size: 28px; line-height: 1; }
-.person-nums .hot strong { color: #dc2626; }
+.person-nums strong.hot { color: #dc2626; }
 .person-small { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0 12px 10px; color: #555; font-size: 12px; }
 .load-track { height: 4px; margin: 0 12px 10px; background: #eee; }
 .load-track span { display: block; height: 4px; background: #f97316; }

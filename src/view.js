@@ -1134,9 +1134,12 @@ function teamCard(row) {
   return `<article class="person-card">
     <h2>${nameLine(row.name, row.color, row.id)}${roleBadge(row.role)}</h2>
     <div class="person-nums">
-      <div><span>Open</span><strong>${row.open}</strong></div>
-      <div class="${row.overdue ? 'hot' : ''}"><span>Overdue</span><strong>${row.overdue}</strong></div>
-      <div><span>Done this month</span><strong>${row.monthCount}</strong></div>
+      <span>Open</span>
+      <span>Overdue</span>
+      <span title="Done this month">Done</span>
+      <strong>${row.open}</strong>
+      <strong${row.overdue ? ' class="hot"' : ''}>${row.overdue}</strong>
+      <strong>${row.monthCount}</strong>
     </div>
     <p class="person-small"><span>${hoursLabel(row.monthHours)} this month</span><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
     <div class="load-track" title="${row.open} open"><span class="w-${Math.max(0, Math.min(100, Math.round(row.load || 0)))}"></span></div>
