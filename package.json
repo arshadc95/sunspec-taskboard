@@ -1,0 +1,22 @@
+{
+  "name": "sunspec-taskboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted team task board for Sunspec Solar / ControlWorx",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "create-superuser": "node scripts/create-superuser.js",
+    "create-admin": "node scripts/create-superuser.js",
+    "test": "node --test test/smoke.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2"
+  }
+}
