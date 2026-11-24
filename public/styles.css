@@ -625,18 +625,19 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .cal-head { min-height: 0; background: var(--header); font-weight: 700; text-transform: uppercase; }
 .cal-day.today { background: #fff7ed; }
 .cal-day.pad { background: #fafafa; }
-.swatch { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; vertical-align: middle; }
-.name-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.swatch { display: inline-block; box-sizing: border-box; width: 6px; height: 6px; min-width: 6px; min-height: 6px; flex: 0 0 6px; padding: 0; border: 0; border-radius: 50%; vertical-align: middle; }
+.name-line { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .color-pick { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 2px; margin: 0; }
 .color-pick label { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 1px solid transparent; cursor: pointer; flex: 0 0 16px; }
 .color-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; padding: 0; border: 0; }
 .color-pick input:checked + .swatch { outline: 1px solid #111; outline-offset: 2px; }
 .color-pick input:focus-visible + .swatch { outline: 2px solid #f97316; outline-offset: 2px; }
 table.users td { vertical-align: middle; }
-table.users .user-name { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; min-width: 0; }
-table.users .user-name > .swatch { flex: 0 0 8px; }
+table.users .user-name { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; min-width: 0; }
+table.users .user-name > .swatch { flex: 0 0 6px; }
 table.users .user-name-input { flex: 1 1 auto; width: auto; min-width: 8em; }
-.chip { display: flex; align-items: center; gap: 4px; margin-top: 3px; padding: 1px 4px; text-decoration: none; background: #f3f4f6; font-weight: 600; }
+.chip { display: flex; align-items: center; gap: 4px; margin-top: 3px; padding: 1px 4px; text-decoration: none; background: #f3f4f6; font-weight: 600; min-width: 0; }
+.chip .swatch { flex: 0 0 6px; }
 .chip.pri-high { background: #ffedd5; }
 .chip.pri-urgent { background: #fee2e2; }
 .chip.pri-med { background: #dbeafe; }

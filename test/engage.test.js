@@ -152,6 +152,10 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.equal(calendar.res.status, 200);
     assert.match(calendar.text, /Site visit/);
     assert.doesNotMatch(calendar.text, /info-btn/);
+    const thabangColor = db.prepare("SELECT color FROM users WHERE email = 'thabang@example.com'").get().color;
+    assert.match(calendar.text, new RegExp(`class="chip[\\s\\S]*?class="swatch" style="background:${thabangColor}"[\\s\\S]*?Site visit`));
+    const week = await page(base, admin, `/calendar?view=week&day=${todayDate()}`);
+    assert.match(week.text, new RegExp(`class="swatch" style="background:${thabangColor}"[\\s\\S]*?Site visit`));
     const team = await page(base, admin, '/team');
     assert.match(team.text, /Thabang Madikgetla/);
     assert.match(team.text, /On time/);
