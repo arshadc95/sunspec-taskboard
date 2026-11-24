@@ -112,6 +112,7 @@ function publicUser(row) {
     name: row.name,
     role: row.role,
     active: row.active,
+    color: row.color,
   };
 }
 

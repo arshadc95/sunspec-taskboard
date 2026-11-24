@@ -201,7 +201,8 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
   <div class="crumb">${crumb}</div>
   <div class="top-actions">${actions}</div>
   <div class="who">
-    <span class="who-name">${nameLine(user.name, user.color)}</span>
+    ${swatch(user.color)}
+    <span class="who-name">${esc(user.name)}</span>
     ${roleBadge(user.role)}
   </div>
 </header>

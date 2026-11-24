@@ -124,7 +124,7 @@ test('login, roles, tasks, and comments', { timeout: 60000 }, async () => {
 
     const home = await page(base, session.cookies, '/');
     assert.equal(home.res.status, 200);
-    assert.match(home.text, /Arshad/);
+    assert.match(home.text, /class="who"[\s\S]*class="swatch"[\s\S]*who-name">Arshad[\s\S]*role-superuser/);
     assert.match(home.text, /role-superuser/);
     assert.match(home.text, /src="\/sunspec-logo.png"/);
 
