@@ -541,7 +541,6 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
       </div>
       <div class="std" data-standard>
         <div class="std-row">
-          <span class="std-tag" data-std-tag>${esc(first.category)}</span>
           <strong class="std-title" data-std-title>${esc(first.title)}</strong>
           <span class="std-code" data-std-code>${esc(first.code)}</span>
           <button type="button" class="std-nav" data-std-prev aria-label="Previous standard">‹</button>

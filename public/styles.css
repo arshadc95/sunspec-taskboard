@@ -354,16 +354,6 @@ tr.task-row:hover td { background: #fff7ed; }
   padding: 0 8px;
 }
 .std-nav { width: 28px; padding: 0; }
-.std-tag {
-  background: #f97316;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 3px 6px;
-  flex: 0 0 auto;
-}
 .std-line { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333; font-size: 13px; }
 .std-detail { margin: 0; padding: 0 0 2px; color: #333; font-size: 13px; line-height: 1.35; }
 .std-detail[hidden] { display: none; }

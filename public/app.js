@@ -31,7 +31,6 @@ if (standardRoot && standardList.length) {
   const code = standardRoot.querySelector('[data-std-code]');
   const title = standardRoot.querySelector('[data-std-title]');
   const why = standardRoot.querySelector('[data-std-why]');
-  const tag = standardRoot.querySelector('[data-std-tag]');
   const deck = [
     ...standardList.filter((item) => item.kind !== 'concept'),
     ...standardList.filter((item) => item.kind === 'concept'),
@@ -44,7 +43,6 @@ if (standardRoot && standardList.length) {
     if (title) title.textContent = item.title;
     if (code) code.textContent = item.code;
     if (why) why.textContent = item.why;
-    if (tag) tag.textContent = item.category;
     if (remember) {
       try { localStorage.setItem('std-last', item.id); } catch { /* private mode */ }
     }
