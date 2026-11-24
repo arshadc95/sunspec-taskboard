@@ -23,6 +23,46 @@ function readJson(id) {
   try { return JSON.parse(node.textContent || '[]'); } catch { return []; }
 }
 
+const standardRoot = document.querySelector('[data-standard]');
+const standardList = readJson('standards-data');
+if (standardRoot && standardList.length) {
+  const code = standardRoot.querySelector('[data-std-code]');
+  const summary = standardRoot.querySelector('[data-std-summary]');
+  const tag = standardRoot.querySelector('[data-std-tag]');
+  const tip = standardRoot.querySelector('[data-std-tip]');
+  const more = standardRoot.querySelector('[data-std-more]');
+  let index = 0;
+  const show = (next, remember) => {
+    index = (next + standardList.length) % standardList.length;
+    const item = standardList[index];
+    if (code) code.textContent = item.code;
+    if (summary) summary.textContent = item.summary;
+    if (tag) tag.textContent = item.category;
+    if (tip) {
+      tip.textContent = item.tip;
+      tip.hidden = true;
+    }
+    more?.setAttribute('aria-expanded', 'false');
+    if (remember) {
+      try { localStorage.setItem('std-last', item.id); } catch { /* private mode */ }
+    }
+  };
+  let last = '';
+  try { last = localStorage.getItem('std-last') || ''; } catch { /* private mode */ }
+  let start = Math.floor(Math.random() * standardList.length);
+  if (standardList.length > 1 && standardList[start].id === last) {
+    start = (start + 1 + Math.floor(Math.random() * (standardList.length - 1))) % standardList.length;
+  }
+  show(start, true);
+  standardRoot.querySelector('[data-std-prev]')?.addEventListener('click', () => show(index - 1, true));
+  standardRoot.querySelector('[data-std-next]')?.addEventListener('click', () => show(index + 1, true));
+  more?.addEventListener('click', () => {
+    const open = tip.hasAttribute('hidden');
+    tip.toggleAttribute('hidden', !open);
+    more.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+}
+
 function formatElapsed(startedAt) {
   const start = Date.parse(startedAt);
   if (!Number.isFinite(start)) return '';

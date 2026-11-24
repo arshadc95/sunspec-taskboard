@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
 import { daysBetween, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
+
+const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
 const ICONS = {
   tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -110,8 +113,11 @@ function navLink(href, icon, label, active, badge = 0) {
   return `<a class="nav-link${active === icon ? ' active' : ''}" href="${href}" title="${esc(label)}" aria-label="${esc(label)}">${ICONS[icon]}${count}<span class="nav-label">${esc(label)}</span></a>`;
 }
 
-function sheet(title, inner, flush = false) {
-  return `<section class="sheet"><header class="sheet-title"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${esc(title)}</span></header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
+function sheet(title, inner, flush = false, hint = '') {
+  const info = hint
+    ? `<span class="info-tip"><button type="button" class="info-btn" aria-label="About ${esc(title)}">i</button><span class="info-pop" role="tooltip">${esc(hint)}</span></span>`
+    : '';
+  return `<section class="sheet"><header class="sheet-title"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${esc(title)}</span>${info}</header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
 }
 
 function peopleScript(users) {
@@ -451,18 +457,6 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
           <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th><th></th>
         </tr></thead>
         <tbody>
-          <tr class="quick-add"><td colspan="10">
-            <form class="quick-form" method="post" action="/tasks">
-              <input type="hidden" name="_csrf" value="${esc(csrf)}">
-              <input type="hidden" name="quick" value="1">
-              <input type="hidden" name="status" value="todo">
-              <input name="title" maxlength="200" placeholder="Add a task…" aria-label="Add a task" required>
-              <select name="assignee_id" aria-label="Assignee">${options(users.map((person) => [person.id, person.name]), '', 'Assignee')}</select>
-              <select name="project_id" aria-label="Project">${options((projects || []).map((project) => [project.id, project.name]), '', 'Project')}</select>
-              <input name="due_date" type="date" aria-label="Due date">
-              <button class="btn btn-primary" type="submit">Add</button>
-            </form>
-          </td></tr>
           ${openGroups.map((group) => `
             <tr class="group"><td colspan="10">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
             ${group.rows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}
@@ -471,7 +465,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         </tbody>
         ${doneRows.length ? `<tbody class="done-rows"${showDone ? '' : ' hidden'}>${doneRows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}</tbody>` : ''}
       </table></div>
-      <div class="cards">${cards || '<div class="panel empty">No open tasks. Add one above.</div>'}</div>`;
+      <div class="cards">${cards || '<div class="panel empty">No open tasks.</div>'}</div>`;
 
   const assigneeOptions = [
     ['', 'All assignees'],
@@ -481,47 +475,40 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const selectedAssignee = filters.mine ? '' : (filters.assigneeId === 'none' ? 'none' : (filters.assigneeId || ''));
 
   const mineDay = day || { open: 0, dueToday: 0, timer: null };
-  const myDayHtml = [
-    '<div class="myday">',
-    `<a href="/?mine=1">${mineDay.open} open</a>`,
-    `<a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>`,
-    mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>',
-    '</div>',
-  ].join('');
-  const filtersHtml = `<form class="filters" method="get" action="/" data-live>
-        <button type="button" class="btn filters-toggle" data-filters-toggle>Filters</button>
-        <div class="filters-body">
-          <label class="field"><span>Status</span>
-            <select name="status">${options(STATUSES, filters.status, 'All statuses')}</select>
-          </label>
-          <label class="field"><span>Assignee</span>
-            <select name="assignee">${options(assigneeOptions, selectedAssignee)}</select>
-          </label>
-          <label class="field"><span>Project</span>
-            <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
-          </label>
-          <label class="check"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}> <span>My tasks</span></label>
-          <label class="check"><input type="checkbox" name="overdue" value="1"${filters.overdue ? ' checked' : ''}> <span>Overdue only</span></label>
-          <label class="check"><input type="checkbox" name="mentions" value="1"${filters.mentions ? ' checked' : ''}> <span>Mentions</span></label>
-          <label class="field search"><span>Search</span>
-            <input type="search" name="q" value="${esc(filters.search || '')}" placeholder="Search tasks">
-          </label>
-        </div>
-        <a class="btn" data-csv href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
-        <a class="btn" href="/">Clear</a>
+  const first = standards[0];
+  const myDayHtml = `<div class="dayline">
+      <div class="dayline-stats">
+        <span class="dayline-kicker">My day</span>
+        <a href="/?mine=1">${mineDay.open} open</a>
+        <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
+        ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
+      </div>
+      <div class="std" data-standard>
+        <span class="std-kicker">Standard &amp; tip</span>
+        <button type="button" class="std-nav" data-std-prev aria-label="Previous standard">‹</button>
+        <span class="std-tag" data-std-tag>${esc(first.category)}</span>
+        <span class="std-line" data-std-line><strong data-std-code>${esc(first.code)}</strong> <span data-std-summary>${esc(first.summary)}</span></span>
+        <button type="button" class="std-more" data-std-more aria-expanded="false">Tip</button>
+        <button type="button" class="std-nav" data-std-next aria-label="Next standard">›</button>
+        <p class="std-detail" data-std-tip hidden>${esc(first.tip)}</p>
+      </div>
+    </div>
+    <script type="application/json" id="standards-data">${JSON.stringify(standards).replace(/</g, '\\u003c')}</script>`;
+  const filtersHtml = `<form class="board-bar" method="get" action="/" data-live>
+        <select name="status" aria-label="Status">${options(STATUSES, filters.status, 'All statuses')}</select>
+        <select name="assignee" aria-label="Assignee">${options(assigneeOptions, selectedAssignee)}</select>
+        <select name="project" aria-label="Project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
+        <label class="board-search"><input type="search" name="q" value="${esc(filters.search || '')}" placeholder="Search" aria-label="Search"></label>
+        <label class="tog"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}><span>My tasks</span></label>
+        <label class="tog"><input type="checkbox" name="overdue" value="1"${filters.overdue ? ' checked' : ''}><span>Overdue</span></label>
+        <label class="tog"><input type="checkbox" name="mentions" value="1"${filters.mentions ? ' checked' : ''}><span>Mentions</span></label>
+        <a class="btn btn-tiny" data-csv href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
+        <a class="btn btn-tiny" href="/">Clear</a>
       </form>`;
+  const tasksBody = `${filtersHtml}${openGroups.length || doneRows.length ? table : '<p class="empty">No tasks match these filters.</p>'}`;
   const body = `
-    ${sheet('My day', myDayHtml)}
-    ${sheet('Filters', filtersHtml)}
-    <form class="quick-form quick-mobile panel" method="post" action="/tasks">
-      <input type="hidden" name="_csrf" value="${esc(csrf)}">
-      <input type="hidden" name="quick" value="1">
-      <input type="hidden" name="status" value="todo">
-      <input name="title" maxlength="200" placeholder="Add a task…" aria-label="Add a task" required>
-      <button class="btn btn-primary" type="submit">Add</button>
-    </form>
-    <p class="sort-note">Sorted by due date. Press N for a new task. Overdue tasks are highlighted.</p>
-    ${openGroups.length || doneRows.length ? sheet('Tasks', table, true) : sheet('Tasks', '<p class="empty">No tasks match these filters.</p>')}
+    ${myDayHtml}
+    ${sheet('Tasks', tasksBody, true, 'Sorted by due date. Press N for a new task. Overdue tasks are highlighted.')}
       <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
       <div class="drawer-bar"><h2>New task</h2><button type="button" class="drawer-close" data-close-drawer aria-label="Close">×</button></div>
       ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board', autofocus: false })}
@@ -666,9 +653,6 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
 
 export function renderUsers({ user, csrf, msg, users, removed = null }) {
   const superuser = user.role === 'superuser';
-  const createRole = superuser
-    ? `<label class="field"><span>Role</span><select name="role">${options(ROLES, 'user')}</select></label>`
-    : '<p class="hint">New accounts are standard users.</p>';
   const rows = users.map((person) => {
     const self = person.id === user.id;
     const roleEditor = superuser && !self
@@ -690,36 +674,30 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
   }).join('');
 
   const body = `
-    <section class="panel pad">
-      <h1>Users</h1>
-      <form class="stack" method="post" action="/users">
+    ${sheet('Users', `<form class="board-bar" method="post" action="/users">
         <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        <div class="form-grid">
-          <label class="field"><span>Name</span><input name="name" required maxlength="120"></label>
-          <label class="field"><span>Email</span><input name="email" type="email" required></label>
-          <label class="field"><span>Password</span><input name="password" type="password" required minlength="8" autocomplete="new-password"></label>
-          ${createRole}
-        </div>
-        <div class="form-actions"><button class="btn btn-primary" type="submit">Create user</button></div>
+        <input name="name" required maxlength="120" placeholder="Name" aria-label="Name">
+        <input name="email" type="email" required placeholder="Email" aria-label="Email">
+        <input name="password" type="password" required minlength="8" autocomplete="new-password" placeholder="Password" aria-label="Password">
+        ${superuser ? `<select name="role" aria-label="Role">${options(ROLES, 'user')}</select>` : ''}
+        <button class="btn btn-primary" type="submit">Create</button>
       </form>
-    </section>
-    ${sheet('People', `<div class="table-wrap">
-      <table class="grid users">
-        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Password</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6">No users to show.</td></tr>'}</tbody>
-      </table>
-    </div>`, true)}
-    ${removed ? `<section class="panel pad">
-      <h2>Removed</h2>
-      ${removed.length ? `<table class="grid"><thead><tr><th>Task</th><th>Created by</th><th>Removed</th><th></th></tr></thead><tbody>
-        ${removed.map((task) => `<tr>
-          <td>${esc(task.title)}</td>
-          <td>${esc(task.creator_name || '—')}</td>
-          <td>${esc(formatDateTime(task.deleted_at))}</td>
-          <td><form method="post" action="/tasks/${task.id}/restore"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn" type="submit">Restore</button></form></td>
-        </tr>`).join('')}
-      </tbody></table>` : '<p class="hint">No removed tasks.</p>'}
-    </section>` : ''}`;
+      <h2 class="light-h">People</h2>
+      <div class="table-wrap">
+        <table class="grid users">
+          <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Password</th><th></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6">No users to show.</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${removed ? `<h2 class="light-h">Removed</h2>
+        ${removed.length ? `<table class="grid"><thead><tr><th>Task</th><th>Created by</th><th>Removed</th><th></th></tr></thead><tbody>
+          ${removed.map((task) => `<tr>
+            <td>${esc(task.title)}</td>
+            <td>${esc(task.creator_name || '—')}</td>
+            <td>${esc(formatDateTime(task.deleted_at))}</td>
+            <td><form method="post" action="/tasks/${task.id}/restore"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn" type="submit">Restore</button></form></td>
+          </tr>`).join('')}
+        </tbody></table>` : '<p class="hint">No removed tasks.</p>'}` : ''}`, true)}`;
 
   return layout({
     title: 'Users · Sunspec',
@@ -885,29 +863,33 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
   const agenda = `<div class="cal-agenda">${agendaDays.map((day) => `<section><h2>${esc(formatDue(day))}</h2><ul class="plain">${byDay.get(day).map((task) => `<li>${chip(task, today)}</li>`).join('')}</ul></section>`).join('') || '<p class="hint">Nothing due in this range.</p>'}</div>`;
   const assigneeOptions = [['', 'All assignees'], ['none', 'Unassigned'], ...users.map((person) => [String(person.id), person.name])];
   const selectedAssignee = filters.mine ? '' : (filters.assigneeId === 'none' ? 'none' : (filters.assigneeId || ''));
+  const monthHref = withKeep({ month: `${year}-${String(month).padStart(2, '0')}` });
+  const weekHref = withKeep({ view: 'week', day: anchor });
   const body = `
-    ${sheet('Calendar', `<div class="cal-nav">
-      <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: prevWeek }) : withKeep({ month: prevMonth })}">Prev</a>
-      <strong>${esc(label)}</strong>
-      <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: nextWeek }) : withKeep({ month: nextMonth })}">Next</a>
-      <a class="btn" href="${withKeep(view === 'week' ? { view: 'week', day: today } : { month: today.slice(0, 7) })}">Today</a>
-      <a class="btn${view === 'month' ? ' btn-primary' : ''}" href="${withKeep({ month: `${year}-${String(month).padStart(2, '0')}` })}">Month</a>
-      <a class="btn${view === 'week' ? ' btn-primary' : ''}" href="${withKeep({ view: 'week', day: anchor })}">Week</a>
-    </div>
-    <form class="filters" method="get" action="/calendar" data-live>
-      <button type="button" class="btn filters-toggle" data-filters-toggle>Filters</button>
-      <div class="filters-body">
-        <label class="field"><span>Status</span><select name="status">${options(STATUSES, filters.status, 'All statuses')}</select></label>
-        <label class="field"><span>Assignee</span><select name="assignee">${options(assigneeOptions, selectedAssignee)}</select></label>
-        <label class="field"><span>Project</span><select name="project">${options(projects.map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select></label>
-        <label class="check"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}> <span>My tasks</span></label>
+    <section class="sheet">
+      <form class="board-bar" method="get" action="/calendar" data-live>
+        <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: prevWeek }) : withKeep({ month: prevMonth })}">Prev</a>
+        <strong class="cal-label">${esc(label)}</strong>
+        <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: nextWeek }) : withKeep({ month: nextMonth })}">Next</a>
+        <a class="btn" href="${withKeep(view === 'week' ? { view: 'week', day: today } : { month: today.slice(0, 7) })}">Today</a>
+        <span class="seg-toggle">
+          <a class="${view === 'month' ? 'on' : ''}" href="${monthHref}">Month</a>
+          <a class="${view === 'week' ? 'on' : ''}" href="${weekHref}">Week</a>
+        </span>
+        <select name="status" aria-label="Status">${options(STATUSES, filters.status, 'All statuses')}</select>
+        <select name="assignee" aria-label="Assignee">${options(assigneeOptions, selectedAssignee)}</select>
+        <select name="project" aria-label="Project">${options(projects.map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
+        <label class="tog"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}><span>My tasks</span></label>
         <input type="hidden" name="view" value="${esc(view)}">
         ${view === 'week' ? `<input type="hidden" name="day" value="${esc(anchor)}">` : `<input type="hidden" name="month" value="${year}-${String(month).padStart(2, '0')}">`}
-      </div>
-      <a class="btn" href="/calendar">Clear</a>
-    </form>`)}
-    ${sheet(view === 'week' ? 'Week' : 'Month', `${grid}${agenda}`, true)}
-    ${sheet('No due date', undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>')}`;
+        <a class="bar-clear" href="/calendar">Clear</a>
+      </form>
+      ${grid}${agenda}
+    </section>
+    <section class="plain-block">
+      <h2>No due date</h2>
+      ${undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>'}
+    </section>`;
   return layout({
     title: 'Calendar · Sunspec',
     user,
@@ -922,10 +904,9 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
 
 export function renderTeam({ user, csrf, rows }) {
   const body = `
-    ${sheet('Team', `<p class="hint">Completed work and tracked hours. On time means the completion day in Johannesburg is on or before the due date. A streak is consecutive days with at least one completion, counting back from today.</p>
-    <div class="table-wrap">
+    ${sheet('Team', `<div class="table-wrap">
       <table class="grid">
-        <thead><tr><th>Person</th><th>Done this week</th><th>Done this month</th><th>Hours this week</th><th>Hours this month</th><th>On time</th><th>Streak</th></tr></thead>
+        <thead><tr><th>Person</th><th class="num">Done this week</th><th class="num">Done this month</th><th class="num">Hours this week</th><th class="num">Hours this month</th><th class="num">On time</th><th class="num">Streak</th></tr></thead>
         <tbody>
           ${rows.length ? rows.map((row) => `<tr>
             <td>${esc(row.name)}</td>
@@ -938,7 +919,7 @@ export function renderTeam({ user, csrf, rows }) {
           </tr>`).join('') : '<tr><td colspan="7">No active people yet.</td></tr>'}
         </tbody>
       </table>
-    </div>`) }`;
+    </div>`, true, 'Completed work and tracked hours. On time means the completion day in Johannesburg is on or before the due date. A streak is consecutive days with at least one completion, counting back from today.')}`;
   return layout({
     title: 'Team · Sunspec',
     user,
