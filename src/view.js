@@ -12,7 +12,7 @@ const ICONS = {
   team: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6M16 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6M3 20a5 5 0 0 1 10 0M13 20a5 5 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
-const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig', 'notimer']);
+const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig', 'notimer', 'grokoff', 'groklimit']);
 
 export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -91,6 +91,8 @@ function banner(msg) {
     lastsuper: 'The last active superuser cannot be demoted or deactivated.',
     short: 'Passwords must be at least 8 characters.',
     toobig: 'That file is larger than 10 MB.',
+    grokoff: "Grok isn't connected yet. The comment was saved.",
+    groklimit: 'Grok is catching up. You can send 20 messages an hour, and the daily limit after that. The comment was saved.',
   }[msg];
   if (!text) return '';
   return `<div class="banner ${BAD_MSGS.has(msg) ? 'bad' : 'ok'}">${esc(text)}</div>`;
@@ -109,6 +111,26 @@ function navLink(href, icon, label, active, badge = 0) {
 function peopleScript(users) {
   const data = (users || []).filter((user) => user.active !== 0).map((user) => ({ id: user.id, name: user.name }));
   return `<script type="application/json" id="people-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
+}
+
+function grokWidget(user, csrf) {
+  return `<div class="grok" data-grok data-csrf="${esc(csrf)}">
+    <button type="button" class="grok-bubble" aria-label="Open Grok" title="Grok">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4 L8 20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg>
+    </button>
+    <section class="grok-panel" hidden>
+      <header class="grok-head">
+        <strong>Grok</strong>
+        <button type="button" data-grok-close aria-label="Close">×</button>
+      </header>
+      <div class="grok-log" data-grok-log></div>
+      <form class="grok-form" data-grok-form>
+        <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
+        <button type="submit">Send</button>
+      </form>
+    </section>
+  </div>
+  <script type="application/json" id="mention-extra">${JSON.stringify([{ id: user.grokId, name: 'Grok' }]).replace(/</g, '\\u003c')}</script>`;
 }
 
 function toastBox(toast, csrf) {
@@ -174,6 +196,7 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
   ${staff ? `<a class="${active === 'chart' ? 'active' : ''}" href="/manage">Manage</a>` : ''}
   ${staff ? `<a class="${active === 'users' ? 'active' : ''}" href="/users">Users</a>` : ''}
 </nav>
+${grokWidget(user, csrf)}
 ${peopleScript(people)}`);
 }
 

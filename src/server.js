@@ -48,6 +48,11 @@ import {
   listRemovedTasks,
   listRunningTimers,
   listTimeEntries,
+  addGrokMessage,
+  ensureGrokUser,
+  getOrCreateGrokThread,
+  listGrokMessages,
+  recordGrokRequest,
   getRunningTimer,
   markMentionsRead,
   myDay,
@@ -68,6 +73,7 @@ import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
 import { daysAgoIso, entrySeconds, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
+import { grokConnected, mountBot, postGrokWebhook, rateLimitMessage, recentContext } from './grok.js';
 import {
   renderBoard,
   renderCalendar,
@@ -222,6 +228,7 @@ export function createApp(config) {
       console.warn('No users yet. Set ADMIN_EMAIL and ADMIN_PASSWORD, or run npm run create-superuser.');
     }
   }
+  const grokUser = ensureGrokUser(db);
 
   let dummyHash = '';
   const app = express();
@@ -262,7 +269,10 @@ export function createApp(config) {
     const row = sessionId ? getSessionUser(db, sessionId) : null;
     req.sessionId = row ? sessionId : null;
     req.user = row ? publicUser(row) : null;
-    if (req.user) req.user.unreadMentions = unreadMentionCount(db, req.user.id);
+    if (req.user) {
+      req.user.unreadMentions = unreadMentionCount(db, req.user.id);
+      req.user.grokId = grokUser.id;
+    }
     next();
   });
 
@@ -636,11 +646,16 @@ export function createApp(config) {
     const body = String(req.body.body || '').trim();
     if (!body || body.length > 8000) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     const commentId = addComment(db, { taskId: task.id, authorId: req.user.id, body });
-    const mentioned = activeUserIds(db, mentionedUserIds(body, listActiveUsers(db)));
-    setCommentMentions(db, commentId, mentioned);
+    const candidates = listActiveUsers(db).concat([{ id: grokUser.id, name: grokUser.name, email: grokUser.email }]);
+    const rawMentions = mentionedUserIds(body, candidates);
+    const mentioned = activeUserIds(db, rawMentions);
+    const grokMentioned = rawMentions.includes(grokUser.id);
+    setCommentMentions(db, commentId, grokMentioned ? [...new Set([...mentioned, grokUser.id])] : mentioned);
     notifyMentions(db, { taskId: task.id, userIds: mentioned, actorId: req.user.id });
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'comment', detail: 'Added a comment' });
-    res.redirect(`/tasks/${task.id}?msg=commented`);
+    let grokNote = '';
+    if (grokMentioned) grokNote = askGrok(req, task, body);
+    res.redirect(`/tasks/${task.id}?msg=${grokNote || 'commented'}`);
   });
 
   app.post('/comments/:id/delete', requireUser, (req, res) => {
@@ -684,7 +699,7 @@ export function createApp(config) {
     if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
     const id = numericId(req.params.id);
     const target = id ? getUser(db, id) : null;
-    if (!target) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!target || target.is_bot) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     if (!canEditUser(req.user, target)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     const identity = parseIdentity(req.body);
     if (identity.error) return res.redirect('/users?msg=invalid');
@@ -762,6 +777,77 @@ export function createApp(config) {
     addActivity(db, { taskId: file.task_id, actorId: req.user.id, action: 'attachment', detail: `Removed ${file.original_name}` });
     res.redirect(`/tasks/${file.task_id}?msg=deleted`);
   });
+
+  app.get('/api/grok', requireUser, (req, res) => {
+    const thread = getOrCreateGrokThread(db, req.user.id);
+    res.json(grokState(thread.id));
+  });
+
+  app.post('/api/grok', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).json({ error: 'Form expired. Reload the page and try again.' });
+    const text = String(req.body.text || '').trim();
+    if (!text || text.length > 4000) return res.status(400).json({ error: 'Write a message first.' });
+    if (!grokConnected(config)) return res.status(503).json({ error: "Grok isn't connected yet", connected: false });
+    const limited = rateLimitMessage(db, config, req.user.id);
+    if (limited) return res.status(429).json({ error: limited });
+    const thread = getOrCreateGrokThread(db, req.user.id);
+    const requestId = crypto.randomBytes(12).toString('hex');
+    addGrokMessage(db, { threadId: thread.id, role: 'user', body: text, requestId, status: 'complete' });
+    addGrokMessage(db, { threadId: thread.id, role: 'grok', body: '', requestId, status: 'pending' });
+    recordGrokRequest(db, req.user.id);
+    const history = listGrokMessages(db, thread.id);
+    postGrokWebhook(config, {
+      type: 'chat',
+      request_id: requestId,
+      user: { id: req.user.id, name: req.user.name, role: req.user.role },
+      text,
+      thread_id: thread.id,
+      recent_context: recentContext(history.filter((row) => row.status === 'complete' && row.body)),
+      board_url: `${req.protocol}://${req.get('host')}/`,
+    });
+    res.json(grokState(thread.id));
+  });
+
+  mountBot(app, { db, config, grokUser: () => grokUser });
+
+  function grokState(threadId) {
+    const messages = listGrokMessages(db, threadId);
+    return {
+      connected: grokConnected(config),
+      thread_id: threadId,
+      pending: messages.some((row) => row.status === 'pending'),
+      messages: messages.map((row) => ({ id: row.id, role: row.role, body: row.body, status: row.status })),
+    };
+  }
+
+  function askGrok(req, task, text) {
+    if (!grokConnected(config)) return 'grokoff';
+    const limited = rateLimitMessage(db, config, req.user.id);
+    if (limited) return 'groklimit';
+    const requestId = crypto.randomBytes(12).toString('hex');
+    recordGrokRequest(db, req.user.id);
+    const comments = listComments(db, task.id);
+    postGrokWebhook(config, {
+      type: 'comment',
+      request_id: requestId,
+      user: { id: req.user.id, name: req.user.name, role: req.user.role },
+      text,
+      task: {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assignee: task.assignee_name || null,
+        due: task.due_date || null,
+      },
+      recent_context: recentContext(comments.slice(-10).map((comment) => ({
+        role: comment.author_name,
+        body: comment.body,
+        created_at: comment.created_at,
+      }))),
+      board_url: `${req.protocol}://${req.get('host')}/tasks/${task.id}`,
+    });
+    return '';
+  }
 
   app.use((req, res) => {
     if (!req.user) return res.redirect('/login');

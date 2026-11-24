@@ -222,7 +222,7 @@ function renderMentions(field) {
   const query = mentionQuery(field);
   mentionTarget = field;
   if (!query) { mentionMenu.hidden = true; return; }
-  const people = readJson('people-data').filter((person) => person.name.toLowerCase().includes(query.text.toLowerCase())).slice(0, 8);
+  const people = readJson('people-data').concat(readJson('mention-extra')).filter((person) => person.name && person.name.toLowerCase().includes(query.text.toLowerCase())).slice(0, 8);
   mentionMenu.innerHTML = '';
   if (!people.length) { mentionMenu.hidden = true; return; }
   people.forEach((person, index) => {
@@ -261,6 +261,98 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Enter' && buttons[mentionIndex]) { event.preventDefault(); buttons[mentionIndex].dispatchEvent(new MouseEvent('mousedown')); }
   if (event.key === 'Escape') mentionMenu.hidden = true;
 });
+
+const grokRoot = document.querySelector('[data-grok]');
+if (grokRoot) {
+  const bubble = grokRoot.querySelector('.grok-bubble');
+  const panel = grokRoot.querySelector('.grok-panel');
+  const log = grokRoot.querySelector('[data-grok-log]');
+  const form = grokRoot.querySelector('[data-grok-form]');
+  const csrf = grokRoot.dataset.csrf || '';
+  let timer = 0;
+  let pending = false;
+  let open = false;
+  let connected = true;
+
+  function paint(state) {
+    pending = Boolean(state.pending);
+    connected = state.connected !== false;
+    log.innerHTML = '';
+    if (!state.connected) {
+      const note = document.createElement('p');
+      note.className = 'grok-note';
+      note.textContent = "Grok isn't connected yet";
+      log.append(note);
+    }
+    (state.messages || []).forEach((message) => {
+      if (message.status === 'pending' && !message.body) return;
+      const line = document.createElement('p');
+      line.className = message.role === 'user' ? 'grok-mine' : 'grok-theirs';
+      line.textContent = message.body;
+      log.append(line);
+    });
+    if (pending) {
+      const wait = document.createElement('p');
+      wait.className = 'grok-wait';
+      wait.textContent = 'Grok is thinking…';
+      log.append(wait);
+    }
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function load() {
+    const response = await fetch('/api/grok', { headers: { accept: 'application/json' } });
+    if (!response.ok) return;
+    paint(await response.json());
+  }
+
+  function watch() {
+    window.clearInterval(timer);
+    timer = 0;
+    if (!open || !pending) return;
+    timer = window.setInterval(() => { load().catch(() => {}); }, 3000);
+  }
+
+  bubble.addEventListener('click', () => {
+    open = true;
+    panel.hidden = false;
+    load().then(watch).catch(() => {});
+  });
+  grokRoot.querySelector('[data-grok-close]').addEventListener('click', () => {
+    open = false;
+    panel.hidden = true;
+    watch();
+  });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const input = form.querySelector('input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    const mine = document.createElement('p');
+    mine.className = 'grok-mine';
+    mine.textContent = text;
+    log.append(mine);
+    const wait = document.createElement('p');
+    wait.className = 'grok-wait';
+    wait.textContent = connected ? 'Grok is thinking…' : "Grok isn't connected yet";
+    log.append(wait);
+    log.scrollTop = log.scrollHeight;
+    const response = await fetch('/api/grok', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({ _csrf: csrf, text }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      wait.className = 'grok-note';
+      wait.textContent = payload.error || 'Grok could not take that message.';
+      return;
+    }
+    paint(payload);
+    watch();
+  });
+}
 
 if (new URLSearchParams(location.search).get('toast') === 'done' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   const layer = document.createElement('div');

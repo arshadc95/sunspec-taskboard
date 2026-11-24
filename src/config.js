@@ -17,6 +17,12 @@ export function readConfig(env = process.env) {
     adminName: String(env.ADMIN_NAME || 'Superuser').trim() || 'Superuser',
     loginMax: Number(env.LOGIN_MAX_ATTEMPTS || 8),
     loginWindowMs: Number(env.LOGIN_WINDOW_MS || 15 * 60 * 1000),
+    grokWebhookUrl: String(env.GROK_WEBHOOK_URL || '').trim(),
+    grokWebhookSecretHeader: String(env.GROK_WEBHOOK_SECRET_HEADER || '').trim(),
+    grokWebhookSecret: String(env.GROK_WEBHOOK_SECRET || ''),
+    botApiToken: String(env.BOT_API_TOKEN || ''),
+    grokDailyLimit: Number(env.GROK_DAILY_LIMIT || 100),
+    grokHourlyLimit: Number(env.GROK_HOURLY_LIMIT || 20),
   };
 }
 

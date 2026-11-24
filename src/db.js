@@ -131,6 +131,33 @@ function migrate(db) {
 
     CREATE INDEX IF NOT EXISTS idx_mention_notices_user ON mention_notices(user_id, read_at);
 
+    CREATE TABLE IF NOT EXISTS grok_threads (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS grok_messages (
+      id INTEGER PRIMARY KEY,
+      thread_id INTEGER NOT NULL REFERENCES grok_threads(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'grok')),
+      body TEXT NOT NULL DEFAULT '',
+      request_id TEXT,
+      status TEXT NOT NULL DEFAULT 'complete',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_grok_messages_thread ON grok_messages(thread_id, id);
+
+    CREATE TABLE IF NOT EXISTS grok_requests (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_grok_requests_user ON grok_requests(user_id, created_at);
+
     CREATE TABLE IF NOT EXISTS kudos (
       id INTEGER PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
@@ -148,10 +175,14 @@ function migrate(db) {
   if (!columns.some((column) => column.name === 'deleted_at')) {
     db.exec('ALTER TABLE tasks ADD COLUMN deleted_at TEXT');
   }
+  const userColumns = db.prepare('PRAGMA table_info(users)').all();
+  if (!userColumns.some((column) => column.name === 'is_bot')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 export function userCount(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  return db.prepare('SELECT COUNT(*) AS n FROM users WHERE is_bot = 0').get().n;
 }
 
 export function bootstrapSuperuser(db, { email, password, name }) {
@@ -221,13 +252,14 @@ export function listUsers(db, actor) {
     return db.prepare(`
       SELECT id, email, name, role, active, created_at
       FROM users
-      WHERE role = 'user'
+      WHERE role = 'user' AND is_bot = 0
       ORDER BY active DESC, name COLLATE NOCASE
     `).all();
   }
   return db.prepare(`
     SELECT id, email, name, role, active, created_at
     FROM users
+    WHERE is_bot = 0
     ORDER BY active DESC, CASE role WHEN 'superuser' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, name COLLATE NOCASE
   `).all();
 }
@@ -236,7 +268,7 @@ export function listActiveUsers(db) {
   return db.prepare(`
     SELECT id, email, name, role, active
     FROM users
-    WHERE active = 1
+    WHERE active = 1 AND is_bot = 0
     ORDER BY name COLLATE NOCASE
   `).all();
 }
@@ -312,6 +344,14 @@ export function listTasks(db, filters) {
   if (filters.due) {
     where.push('t.due_date = ?');
     params.push(filters.due);
+  }
+  if (filters.dueFrom) {
+    where.push("t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date >= ?");
+    params.push(filters.dueFrom);
+  }
+  if (filters.dueTo) {
+    where.push("t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date <= ?");
+    params.push(filters.dueTo);
   }
   if (filters.mentionUserId) {
     where.push(`(
@@ -953,4 +993,73 @@ export function teamBoard(db, now = Date.now()) {
       streak,
     };
   }).sort((a, b) => b.weekCount - a.weekCount || b.monthCount - a.monthCount || a.name.localeCompare(b.name));
+}
+
+const GROK_EMAIL = 'grok@taskboard.local';
+
+export function ensureGrokUser(db) {
+  const existing = getUserByEmail(db, GROK_EMAIL);
+  if (existing) {
+    db.prepare("UPDATE users SET name = 'Grok', role = 'user', active = 0, is_bot = 1 WHERE id = ?").run(existing.id);
+    return getUser(db, existing.id);
+  }
+  const now = new Date().toISOString();
+  const info = db.prepare(`
+    INSERT INTO users (email, name, password_hash, role, active, is_bot, created_at, updated_at)
+    VALUES (?, 'Grok', ?, 'user', 0, 1, ?, ?)
+  `).run(GROK_EMAIL, hashPassword(`${now}-${Math.random()}`), now, now);
+  return getUser(db, Number(info.lastInsertRowid));
+}
+
+export function getOrCreateGrokThread(db, userId) {
+  const existing = db.prepare('SELECT * FROM grok_threads WHERE user_id = ?').get(userId);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  const info = db.prepare('INSERT INTO grok_threads (user_id, created_at, updated_at) VALUES (?, ?, ?)').run(userId, now, now);
+  return db.prepare('SELECT * FROM grok_threads WHERE id = ?').get(Number(info.lastInsertRowid));
+}
+
+export function listGrokMessages(db, threadId) {
+  return db.prepare(`
+    SELECT id, role, body, request_id, status, created_at
+    FROM grok_messages
+    WHERE thread_id = ?
+    ORDER BY id ASC
+  `).all(threadId);
+}
+
+export function addGrokMessage(db, { threadId, role, body, requestId, status }) {
+  const now = new Date().toISOString();
+  const info = db.prepare(`
+    INSERT INTO grok_messages (thread_id, role, body, request_id, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(threadId, role, body || '', requestId || null, status || 'complete', now);
+  db.prepare('UPDATE grok_threads SET updated_at = ? WHERE id = ?').run(now, threadId);
+  return Number(info.lastInsertRowid);
+}
+
+export function completeGrokReply(db, threadId, { requestId, text }) {
+  const now = new Date().toISOString();
+  const pending = requestId
+    ? db.prepare("SELECT id FROM grok_messages WHERE thread_id = ? AND request_id = ? AND role = 'grok' AND status = 'pending'").get(threadId, requestId)
+    : db.prepare("SELECT id FROM grok_messages WHERE thread_id = ? AND role = 'grok' AND status = 'pending' ORDER BY id DESC").get(threadId);
+  if (pending) {
+    db.prepare("UPDATE grok_messages SET body = ?, status = 'complete' WHERE id = ?").run(text, pending.id);
+  } else {
+    addGrokMessage(db, { threadId, role: 'grok', body: text, requestId, status: 'complete' });
+  }
+  db.prepare('UPDATE grok_threads SET updated_at = ? WHERE id = ?').run(now, threadId);
+}
+
+export function getGrokThread(db, threadId) {
+  return db.prepare('SELECT * FROM grok_threads WHERE id = ?').get(threadId) || null;
+}
+
+export function countGrokRequests(db, userId, sinceMs) {
+  return db.prepare('SELECT COUNT(*) AS n FROM grok_requests WHERE user_id = ? AND created_at > ?').get(userId, sinceMs).n;
+}
+
+export function recordGrokRequest(db, userId) {
+  db.prepare('INSERT INTO grok_requests (user_id, created_at) VALUES (?, ?)').run(userId, Date.now());
+  db.prepare('DELETE FROM grok_requests WHERE created_at < ?').run(Date.now() - 48 * 60 * 60 * 1000);
 }
