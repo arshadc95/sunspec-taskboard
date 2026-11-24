@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
-import { PALETTE, colorClass, colorForUser } from './colors.js';
+import { COLOR_NAMES, PALETTE, colorClass, colorForUser } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
 import { entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
 
@@ -33,12 +33,13 @@ function textBlock(value) {
   return esc(value).replace(/\n/g, '<br>');
 }
 
-function swatch(color, userId) {
-  return `<span class="swatch ${colorClass(color, userId)}" aria-hidden="true"></span>`;
+function swatch(color, userId, name) {
+  const label = name ? ` title="${esc(name)}"` : ' aria-hidden="true"';
+  return `<span class="swatch ${colorClass(color, userId)}"${label}></span>`;
 }
 
 function nameLine(name, color, userId) {
-  return `<span class="name-line">${swatch(color, userId)}${esc(name)}</span>`;
+  return `<span class="name-line">${swatch(color, userId, name)}${esc(name)}</span>`;
 }
 
 function highlightMentions(body, users) {
@@ -46,7 +47,7 @@ function highlightMentions(body, users) {
   const marked = String(body || '').replace(/@\[([^\]]*)\]\((\d+)\)/g, (all, name, id) => {
     const user = (users || []).find((item) => String(item.id) === String(id));
     const label = esc(user?.name || name || 'someone');
-    const index = slots.push(`<span class="mention" data-user="${esc(id)}">${swatch(user?.color, id)}@${label}</span>`) - 1;
+    const index = slots.push(`<span class="mention" data-user="${esc(id)}">${swatch(user?.color, id, user?.name || name || 'someone')}@${label}</span>`) - 1;
     return `\u0000${index}\u0000`;
   });
   let text = esc(marked);
@@ -57,7 +58,7 @@ function highlightMentions(body, users) {
     if (!needle) continue;
     const pattern = new RegExp(`@${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
     text = text.replace(pattern, () => {
-      const index = slots.push(`<span class="mention">${swatch(user.color, user.id)}@${label}</span>`) - 1;
+      const index = slots.push(`<span class="mention">${swatch(user.color, user.id, user.name)}@${label}</span>`) - 1;
       return `\u0000${index}\u0000`;
     });
   }
@@ -128,7 +129,11 @@ function sheet(title, inner, flush = false) {
 }
 
 function peopleScript(users) {
-  const data = (users || []).filter((user) => user.active !== 0).map((user) => ({ id: user.id, name: user.name }));
+  const data = (users || []).filter((user) => user.active !== 0).map((user) => ({
+    id: user.id,
+    name: user.name,
+    swatch: colorClass(user.color, user.id),
+  }));
   return `<script type="application/json" id="people-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
 }
 
@@ -197,7 +202,7 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
   <div class="crumb">${crumb}</div>
   <div class="top-actions">${actions}</div>
   <div class="who">
-    ${swatch(user.color, user.id)}
+    ${swatch(user.color, user.id, user.name)}
     <span class="who-name">${esc(user.name)}</span>
     ${roleBadge(user.role)}
   </div>
@@ -312,7 +317,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
         </label>
         <div class="field" data-assignee-field>
           <div class="label-row"><span>Assignees</span>${canEdit && currentUser ? `<button class="assign-link" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}</div>
-          <div class="assignee-chips" data-assignee-chips>${(value.assignees || []).map((person) => `<span class="assignee-chip" data-id="${person.id}">${swatch(person.color, person.id)}${esc(person.name)}<button type="button" data-remove-assignee aria-label="Remove ${esc(person.name)}">×</button></span>`).join('')}</div>
+          <div class="assignee-chips" data-assignee-chips>${(value.assignees || []).map((person) => `<span class="assignee-chip" data-id="${person.id}">${swatch(person.color, person.id, person.name)}${esc(person.name)}<button type="button" data-remove-assignee aria-label="Remove ${esc(person.name)}">×</button></span>`).join('')}</div>
           <input type="hidden" name="assignee_ids" value="${esc((value.assignee_ids || []).join(','))}" data-assignee-ids>
           <input class="assignee-search" placeholder="Search people" autocomplete="off" data-assignee-search ${off}>
         </div>
@@ -391,7 +396,7 @@ function timeBits(task, user) {
 }
 
 function assigneeMarks(task) {
-  return (task.assignees || []).map((person) => swatch(person.color, person.id)).join('');
+  return (task.assignees || []).map((person) => swatch(person.color, person.id, person.name)).join('');
 }
 
 function assigneeCell(task) {
@@ -720,8 +725,8 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
     return `<tr class="${person.active ? '' : 'inactive'}">
       <td>
         <div class="user-name">
-          ${swatch(person.color, person.id)}
-          <span class="color-pick">${PALETTE.map((color, index) => `<label title="Colour"><input form="user-${person.id}" type="radio" name="color" value="${color}"${shown === color ? ' checked' : ''}><i class="swatch c-${index}"></i></label>`).join('')}</span>
+          ${swatch(person.color, person.id, person.name)}
+          <span class="color-pick">${PALETTE.map((color, index) => `<label title="${esc(COLOR_NAMES[index])}"><input form="user-${person.id}" type="radio" name="color" value="${color}"${shown === color ? ' checked' : ''}><i class="swatch c-${index}" title="${esc(COLOR_NAMES[index])}"></i></label>`).join('')}</span>
           <input class="user-name-input" form="user-${person.id}" name="name" required maxlength="120" value="${esc(person.name)}">
         </div>
       </td>

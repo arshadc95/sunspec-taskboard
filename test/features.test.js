@@ -97,6 +97,10 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
       assert.match(listed.text, new RegExp(`form="user-${person.id}" type="radio" name="color" value="${person.color}" checked`));
     }
     assert.doesNotMatch(listed.text, / style=/);
+    assert.match(listed.text, /class="swatch c-\d+" title="Lindi Nkosi"/);
+    assert.match(listed.text, /title="Red"/);
+    assert.match(listed.text, /title="Yellow"/);
+    assert.doesNotMatch(listed.text, /class="swatch c-\d+" title="[^"]*" aria-hidden/);
     const form = await page(base, admin.cookies, '/tasks/new');
     const created = await post(base, admin.cookies, '/tasks', {
       _csrf: form.csrf,
@@ -268,7 +272,7 @@ test('an old database without colours still shows dots', { timeout: 60000 }, asy
   const { server, base } = await listen(app);
   try {
     const stored = db.prepare("SELECT id, color FROM users WHERE email = 'lindi@example.com'").get();
-    assert.equal(stored.color, PALETTE[stored.id % PALETTE.length]);
+    assert.equal(stored.color, PALETTE[0]);
     const session = await login(base, 'lindi@example.com', 'old-password');
     assert.equal(session.res.status, 302);
     const home = await page(base, session.cookies, '/');
@@ -289,7 +293,7 @@ test('an old database without colours still shows dots', { timeout: 60000 }, asy
   const reopened = openDatabase(file);
   try {
     const fixed = reopened.prepare("SELECT id, color FROM users WHERE email = 'lindi@example.com'").get();
-    assert.equal(fixed.color, PALETTE[fixed.id % PALETTE.length]);
+    assert.equal(fixed.color, PALETTE[0]);
     assert.equal(fixed.color, fixed.color.toLowerCase());
   } finally {
     reopened.close();

@@ -1,16 +1,31 @@
 export const PALETTE = [
-  '#1d4ed8',
-  '#0f766e',
-  '#7c3aed',
-  '#be185d',
-  '#15803d',
-  '#b91c1c',
-  '#0e7490',
-  '#4338ca',
-  '#3f6212',
-  '#9f1239',
-  '#1e3a8a',
-  '#6d28d9',
+  '#e53935',
+  '#1e88e5',
+  '#43a047',
+  '#fdd835',
+  '#8e24aa',
+  '#fb8c00',
+  '#00acc1',
+  '#d81b60',
+  '#6d4c41',
+  '#3949ab',
+  '#7cb342',
+  '#546e7a',
+];
+
+export const COLOR_NAMES = [
+  'Red',
+  'Blue',
+  'Green',
+  'Yellow',
+  'Purple',
+  'Orange',
+  'Cyan',
+  'Pink',
+  'Brown',
+  'Indigo',
+  'Lime',
+  'Slate',
 ];
 
 export function normalizeColor(value) {
@@ -36,6 +51,28 @@ export function colorClass(color, userId) {
   const hex = colorForUser(userId, color);
   const index = PALETTE.indexOf(hex);
   return `c-${index < 0 ? 0 : index}`;
+}
+
+export function colorsToStore(rows) {
+  const sorted = [...rows].sort((a, b) => Number(a.id) - Number(b.id));
+  const used = new Set();
+  for (const row of sorted) {
+    const known = normalizeColor(row.color);
+    if (known) used.add(known);
+  }
+  const updates = [];
+  for (const row of sorted) {
+    const known = normalizeColor(row.color);
+    if (known) {
+      if (known !== row.color) updates.push({ id: row.id, color: known });
+      continue;
+    }
+    const free = PALETTE.find((color) => !used.has(color));
+    const color = free || PALETTE[Math.abs(Math.trunc(Number(row.id))) % PALETTE.length] || PALETTE[0];
+    used.add(color);
+    if (color !== row.color) updates.push({ id: row.id, color });
+  }
+  return updates;
 }
 
 export function nextColor(used = []) {

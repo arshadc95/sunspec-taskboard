@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { colorForUser, nextColor, normalizeColor, PALETTE } from '../src/colors.js';
+import { COLOR_NAMES, colorForUser, colorsToStore, nextColor, normalizeColor, PALETTE } from '../src/colors.js';
 import { clampMonth, monthSpan } from '../src/manage.js';
 
 test('a past calendar month runs from the 1st to the next 1st in Johannesburg', () => {
@@ -22,11 +22,39 @@ test('this month stops at now', () => {
 });
 
 test('colours are stored as lowercase hex and a bad value falls back by user id', () => {
-  assert.equal(normalizeColor('#1D4ED8'), '#1d4ed8');
-  assert.equal(normalizeColor('1D4ED8'), '#1d4ed8');
+  assert.equal(normalizeColor('#E53935'), '#e53935');
+  assert.equal(normalizeColor('E53935'), '#e53935');
   assert.equal(normalizeColor(' BLUE '), null);
+  assert.equal(normalizeColor('#1d4ed8'), null);
   assert.equal(colorForUser(3, 'BLUE'), PALETTE[3 % PALETTE.length]);
-  assert.equal(colorForUser(3, '#1D4ED8'), '#1d4ed8');
+  assert.equal(colorForUser(3, '#E53935'), '#e53935');
+  assert.equal(PALETTE.length, 12);
+  assert.equal(COLOR_NAMES.length, PALETTE.length);
+  assert.equal(new Set(PALETTE).size, PALETTE.length);
+  assert.equal(PALETTE.includes('#f97316'), false);
+});
+
+test('users outside the new palette take distinct colours in id order', () => {
+  const updates = colorsToStore([
+    { id: 4, color: '#E53935' },
+    { id: 1, color: '#1d4ed8' },
+    { id: 2, color: null },
+    { id: 3, color: 'BLUE' },
+  ]);
+  assert.deepEqual(updates, [
+    { id: 1, color: PALETTE[1] },
+    { id: 2, color: PALETTE[2] },
+    { id: 3, color: PALETTE[3] },
+    { id: 4, color: '#e53935' },
+  ]);
+  const fresh = colorsToStore([
+    { id: 8, color: null },
+    { id: 2, color: '' },
+  ]);
+  assert.deepEqual(fresh, [
+    { id: 2, color: PALETTE[0] },
+    { id: 8, color: PALETTE[1] },
+  ]);
 });
 
 test('a new user gets the least used colour from the palette', () => {

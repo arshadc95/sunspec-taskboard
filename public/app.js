@@ -280,12 +280,18 @@ function syncAssignees(field) {
   const hidden = field.querySelector('[data-assignee-ids]');
   if (hidden) hidden.value = [...field.querySelectorAll('.assignee-chip')].map((chip) => chip.dataset.id).join(',');
 }
-function addAssignee(field, id, name) {
+function addAssignee(field, id, name, swatchClass) {
   const chips = field.querySelector('[data-assignee-chips]');
   if (!chips || chips.querySelector(`[data-id="${id}"]`)) return;
   const chip = document.createElement('span');
   chip.className = 'assignee-chip';
   chip.dataset.id = String(id);
+  if (swatchClass) {
+    const dot = document.createElement('span');
+    dot.className = `swatch ${swatchClass}`;
+    dot.title = name;
+    chip.append(dot);
+  }
   chip.append(document.createTextNode(name));
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -309,7 +315,7 @@ document.querySelectorAll('[data-assign-me]').forEach((button) => {
     const field = button.closest('[data-assignee-field]');
     const id = button.getAttribute('data-assign-me');
     const person = readJson('people-data').find((item) => String(item.id) === String(id));
-    if (field && person) addAssignee(field, person.id, person.name);
+    if (field && person) addAssignee(field, person.id, person.name, person.swatch);
   });
 });
 function hideOtherMenus(menu) {
@@ -359,7 +365,7 @@ document.querySelectorAll('[data-assignee-search]').forEach((input) => {
       if (itemIndex === index) choice.classList.add('active');
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();
-        addAssignee(field, item.id, item.name);
+        addAssignee(field, item.id, item.name, item.swatch);
         input.value = '';
         menu.hidden = true;
       });

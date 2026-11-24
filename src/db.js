@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { colorForUser, nextColor, normalizeColor } from './colors.js';
+import { colorForUser, colorsToStore, nextColor, normalizeColor } from './colors.js';
 import { hashPassword } from './passwords.js';
 import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, todayDate } from './time.js';
 
@@ -243,10 +243,7 @@ function migrate(db) {
 function backfillUserColors(db) {
   const rows = db.prepare('SELECT id, color FROM users ORDER BY id').all();
   const update = db.prepare('UPDATE users SET color = ? WHERE id = ?');
-  for (const row of rows) {
-    const color = colorForUser(row.id, row.color);
-    if (color !== row.color) update.run(color, row.id);
-  }
+  for (const row of colorsToStore(rows)) update.run(row.color, row.id);
 }
 
 function paintUser(row) {
