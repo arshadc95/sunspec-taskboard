@@ -123,11 +123,8 @@ function navLink(href, icon, label, active, badge = 0) {
   return `<a class="nav-link${active === icon ? ' active' : ''}" href="${href}" title="${esc(label)}" aria-label="${esc(label)}">${ICONS[icon]}${count}<span class="nav-label">${esc(label)}</span></a>`;
 }
 
-function sheet(title, inner, flush = false, hint = '') {
-  const info = hint
-    ? `<span class="info-tip"><button type="button" class="info-btn" aria-label="About ${esc(title)}">i</button><span class="info-pop" role="tooltip">${esc(hint)}</span></span>`
-    : '';
-  return `<section class="sheet"><header class="sheet-title"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${esc(title)}</span>${info}</header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
+function sheet(title, inner, flush = false) {
+  return `<section class="sheet"><header class="sheet-title"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${esc(title)}</span></header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
 }
 
 function peopleScript(users) {
@@ -162,7 +159,6 @@ function grokWidget(user, csrf) {
       <div class="grok-log" data-grok-log></div>
       <form class="grok-form" data-grok-form>
         <div class="grok-picked" data-grok-picked></div>
-        <p class="grok-pdf-note" data-grok-pdf-note hidden>Grok can read attached PDFs (max 5 × 15 MB, deleted after 24 h).</p>
         <div class="grok-compose">
           <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
           <button type="button" class="grok-attach" data-grok-attach aria-label="Attach PDF">
@@ -226,7 +222,6 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
       ${banner(msg)}
       ${toastBox(toast, csrf)}
       ${body}
-      <p class="tz">Times shown in Africa/Johannesburg.</p>
     </div>
   </div>
 </div>
@@ -261,7 +256,6 @@ export function renderLogin({ msg, next, csrf }) {
       <input name="password" type="password" autocomplete="current-password" required>
     </label>
     <button class="btn btn-primary btn-block" type="submit">Sign in</button>
-    <p class="hint">Accounts are created by an administrator. There is no self sign-up.</p>
   </form>
 </main>`);
 }
@@ -297,10 +291,10 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
       <section class="form-card">
         <h2>Details</h2>
         <label class="field"><span>Title</span>
-          <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit && autofocus ? 'autofocus' : ''}>
+          <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" ${off} ${!value.id && canEdit && autofocus ? 'autofocus' : ''}>
         </label>
         <label class="field"><span>Description</span>
-          <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
+          <textarea name="description" data-mentions rows="4" maxlength="20000" ${off}>${esc(value.description || '')}</textarea>
           ${value.description ? `<div class="desc-preview">${highlightMentions(value.description, users)}</div>` : ''}
         </label>
       </section>
@@ -309,7 +303,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
         <div class="pair">
         <label class="field"><span>Project</span>
           <span class="combo">
-            <input name="project_name" value="${esc(projectName)}" placeholder="Search or create project" autocomplete="off" data-project-input ${off}>
+            <input name="project_name" value="${esc(projectName)}" placeholder="Project" autocomplete="off" data-project-input ${off}>
             <input type="hidden" name="project_id" value="${esc(value.project_id || '')}" data-project-id>
           </span>
         </label>
@@ -446,7 +440,7 @@ function reviewDialog(csrf) {
             <input type="hidden" name="reviewer_id" value="" data-reviewer-id>
           </label>
           <label class="field">Note
-            <input name="note" maxlength="280" placeholder="Optional">
+            <input name="note" maxlength="280" aria-label="Note">
           </label>
         </div>
       </div>
@@ -568,7 +562,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const tasksBody = `${filtersHtml}${openGroups.length || doneRows.length ? table : '<p class="empty">No tasks match these filters.</p>'}`;
   const body = `
     ${myDayHtml}
-    ${sheet('Tasks', tasksBody, true, 'Sorted by due date. Press N for a new task. Overdue tasks are highlighted.')}
+    ${sheet('Tasks', tasksBody, true)}
       <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
       <div class="drawer-bar"><h2>New task</h2><button type="button" class="drawer-close" data-close-drawer aria-label="Close">×</button></div>
       ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board', autofocus: false })}
@@ -597,12 +591,11 @@ function renderTimer(task, csrf, timer) {
   const summary = timer.summary || { total: 0, perUser: [] };
   const entries = timer.entries || [];
   const controls = !timer.canControl
-    ? '<p class="hint">Only the assignee can start or stop the timer.</p>'
+    ? ''
     : mine
     ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
       <form method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-danger" type="submit">Stop</button></form>`
-    : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
-      ${timer.other ? `<p class="hint">Starting stops your timer on <a href="/tasks/${timer.other.task_id}">${esc(timer.other.task_title)}</a>.</p>` : ''}`;
+    : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>`;
   return `<section class="panel pad">
     <h2>Time</h2>
     ${controls}
@@ -664,7 +657,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         <form class="stack" method="post" action="/tasks/${task.id}/comments">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <label class="field"><span>Add a comment</span>
-            <textarea name="body" data-mentions rows="3" required maxlength="8000" placeholder="Add a comment. Type @ to mention someone."></textarea>
+            <textarea name="body" data-mentions rows="3" required maxlength="8000"></textarea>
           </label>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Comment</button></div>
         </form>
@@ -696,7 +689,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
               <button class="btn btn-tiny" type="submit">Delete</button>
             </form>` : ''}
           </li>`;
-        }).join('')}</ul>` : '<p class="hint">No files yet. Maximum 10 MB.</p>'}
+        }).join('')}</ul>` : '<p class="hint">No files yet.</p>'}
         <form class="file-form" method="post" action="/tasks/${task.id}/attachments" enctype="multipart/form-data">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <input type="file" name="file" required>
@@ -802,8 +795,8 @@ function delta(now, prev, tone, label) {
   return `<span class="delta ${klass}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span> <span class="delta flat">${esc(label)}</span>`;
 }
 
-function manageCard(title, sub, inner) {
-  return `<section class="sheet manage-block"><h2>${esc(title)}</h2><p class="card-sub">${esc(sub)}</p>${inner}</section>`;
+function manageCard(title, inner) {
+  return `<section class="sheet manage-block"><h2>${esc(title)}</h2>${inner}</section>`;
 }
 
 function kpiSpark(series, color, zeroCounts = false) {
@@ -811,18 +804,6 @@ function kpiSpark(series, color, zeroCounts = false) {
   const signal = zeroCounts ? present.length > 0 : present.some((value) => value > 0);
   if (!signal) return '<span class="kpi-empty">Not enough data yet</span>';
   return sparkline(present.map((value) => value || 0), color);
-}
-
-function flowSubtitle(cfd, bucket) {
-  const names = [
-    ['todo', 'To do'],
-    ['in_progress', 'In progress'],
-    ['review', 'Review'],
-    ['done', 'Done'],
-  ].filter(([key]) => (cfd?.[key] || []).some((value) => value > 0)).map(([, label]) => label);
-  if (names.length < 2) return 'A wide band means tasks are sitting in that status.';
-  const list = names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
-  return `How many tasks are in ${list} each ${bucket === 'week' ? 'week' : 'day'}. A wide band means tasks are sitting there.`;
 }
 
 export function renderManage({ user, csrf, msg, board, projects }) {
@@ -855,7 +836,6 @@ export function renderManage({ user, csrf, msg, board, projects }) {
     </section>
     <section class="sheet manage-block">
       <h2>People</h2>
-      <p class="card-sub">Assigned work, what was finished, and how long it took.</p>
       <div class="table-wrap"><table class="grid">
         <thead><tr>
           <th>${sortLink(board, 'name', 'Name')}</th>
@@ -878,19 +858,19 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       </table></div>
     </section>
     <div class="manage-grid">
-      ${manageCard('Created vs done', 'If created stays above done, work is piling up.', `<div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div>`)}
-      ${manageCard('Status over time', flowSubtitle(board.cfd, board.bucket), `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
-      ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
-      ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
+      ${manageCard('Created vs done', `<div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div>`)}
+      ${manageCard('Status over time', `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
+      ${manageCard('Days per task', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
+      ${manageCard('Open over time', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>
-    ${manageCard('Workload', 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
-    ${manageCard('Month by month', 'Created, finished, and still late at the end of each month.', `<div class="table-wrap"><table class="grid">
+    ${manageCard('Workload', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
+    ${manageCard('Month by month', `<div class="table-wrap"><table class="grid">
       <thead><tr><th>Month</th><th class="num">Created</th><th class="num">Done</th><th class="num">Overdue</th><th class="num">Avg days to finish</th></tr></thead>
       <tbody>${(board.monthRows || []).map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.created}</td><td class="num">${row.done}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.avg == null ? '—' : row.avg}</td></tr>`).join('')}</tbody>
     </table></div>`)}
     <div class="manage-grid">
-      ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${item.owners?.length ? item.owners.map((person) => nameLine(person.name, person.color, person.id)).join(' ') : 'Unassigned'} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
-      ${manageCard('By project', 'Open, overdue, and finished tasks in this period.', `<div class="table-wrap"><table class="grid">
+      ${manageCard('Needs attention', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${item.owners?.length ? item.owners.map((person) => nameLine(person.name, person.color, person.id)).join(' ') : 'Unassigned'} · ${esc(item.note)}</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue, stuck in review, or unassigned.</p>')}
+      ${manageCard('By project', `<div class="table-wrap"><table class="grid">
           <thead><tr><th>Project</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Done</th></tr></thead>
           <tbody>${board.projects.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.open}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.done}</td></tr>`).join('') || '<tr><td colspan="4">No project work in this period.</td></tr>'}</tbody>
         </table></div>`)}
@@ -1024,7 +1004,7 @@ export function renderTeam({ user, csrf, rows }) {
           </tr>`).join('') : '<tr><td colspan="7">No active people yet.</td></tr>'}
         </tbody>
       </table>
-    </div>`, true, 'Completed work and tracked hours. On time means the completion day in Johannesburg is on or before the due date. A streak is consecutive days with at least one completion, counting back from today.')}`;
+    </div>`, true)}`;
   return layout({
     title: 'Team · Sunspec',
     user,

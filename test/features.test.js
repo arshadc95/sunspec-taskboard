@@ -161,7 +161,7 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(manage.text, /class="kpi-row"/);
     assert.match(manage.text, /Created vs done/);
     assert.match(manage.text, /Avg days to finish/);
-    assert.match(manage.text, /If created stays above done/);
+    assert.doesNotMatch(manage.text, /If created stays above done|card-sub|wide band|piling up/);
     assert.doesNotMatch(manage.text, /info-btn/);
     assert.match(manage.text, /Not enough data yet/);
     assert.doesNotMatch(manageDenied.text, /href="\/manage"/);
