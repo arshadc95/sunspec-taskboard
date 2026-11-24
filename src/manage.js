@@ -104,7 +104,7 @@ function onTimeRate(tasks) {
   return Math.round((ok / withDue.length) * 100);
 }
 
-export function buildManage(db, { projectId = null, month = null, sort = 'name', dir = 'asc', now = new Date(), viewerId = null } = {}) {
+export function buildManage(db, { projectId = null, month = null, now = new Date() } = {}) {
   const today = todayDate(now);
   const nowMs = now.getTime();
   const tasks = db.prepare(`
@@ -172,21 +172,9 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
       avgDays: round1(mean(cycles)),
       inProgress: mine.filter((task) => task.status === 'in_progress').length,
     };
-  }).filter((person) => person.assigned > 0 || person.done > 0);
-
-  const sorters = {
-    name: (a, b) => a.name.localeCompare(b.name),
-    assigned: (a, b) => a.assigned - b.assigned,
-    done: (a, b) => a.done - b.done,
-    ontime: (a, b) => (a.onTimePct ?? -1) - (b.onTimePct ?? -1),
-    avg: (a, b) => (a.avgDays ?? 9999) - (b.avgDays ?? 9999),
-    overdue: (a, b) => a.overdue - b.overdue,
-  };
-  const sortedPeople = [...personStats].sort((a, b) => {
-    const cmp = (sorters[sort] || sorters.name)(a, b);
-    const signed = dir === 'desc' ? -cmp : cmp;
-    return signed || a.name.localeCompare(b.name);
   });
+
+  const sortedPeople = [...personStats].sort((a, b) => b.assigned - a.assigned || a.name.localeCompare(b.name));
 
   const openNow = live.filter((task) => task.status !== 'done');
   const overdueNow = openNow.filter((task) => task.due_date && task.due_date < today);
@@ -413,8 +401,8 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     compare,
     bucket: 'day',
     monthRows,
-    sort,
-    dir,
+    sort: 'assigned',
+    dir: 'desc',
     projectId,
     people: sortedPeople,
     kpis: {

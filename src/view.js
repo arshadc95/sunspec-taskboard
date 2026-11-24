@@ -822,15 +822,7 @@ function manageHref(board, extra = {}) {
   const month = extra.month !== undefined ? extra.month : board.month;
   if (month) params.set('month', month);
   if (board.projectId) params.set('project', String(board.projectId));
-  if (extra.sort) params.set('sort', extra.sort);
-  if (extra.dir) params.set('dir', extra.dir);
   return `/manage?${params}`;
-}
-
-function sortLink(board, key, label) {
-  const next = board.sort === key ? (board.dir === 'asc' ? 'desc' : 'asc') : (key === 'name' ? 'asc' : 'desc');
-  const mark = board.sort === key ? (board.dir === 'asc' ? ' ↑' : ' ↓') : '';
-  return `<a href="${manageHref(board, { sort: key, dir: next })}">${esc(label)}${mark}</a>`;
 }
 
 function delta(now, prev, tone, label) {
@@ -904,12 +896,12 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       <p class="card-sub">Assigned work, what was finished, and how long it took.</p>
       <div class="table-wrap"><table class="grid">
         <thead><tr>
-          <th>${sortLink(board, 'name', 'Name')}</th>
-          <th class="num">${sortLink(board, 'assigned', 'Assigned')}</th>
-          <th class="num">${sortLink(board, 'done', 'Done')}</th>
-          <th class="num">${sortLink(board, 'ontime', 'On time')}</th>
-          <th class="num">${sortLink(board, 'avg', 'Avg days')}</th>
-          <th class="num">${sortLink(board, 'overdue', 'Overdue')}</th>
+          <th>Name</th>
+          <th class="num">Assigned</th>
+          <th class="num">Done</th>
+          <th class="num">On time</th>
+          <th class="num">Avg days</th>
+          <th class="num">Overdue</th>
         </tr></thead>
         <tbody>
           ${board.people.map((person) => `<tr>

@@ -483,7 +483,7 @@ export function createApp(config) {
       user: req.user,
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
-      board: buildManage(db, { ...filters, viewerId: req.user.id }),
+      board: buildManage(db, filters),
       projects: listProjects(db),
     }));
   });
@@ -1201,9 +1201,7 @@ function manageFilters(req) {
   const projectId = /^\d+$/.test(String(req.query.project || '')) ? Number(req.query.project) : null;
   const rawMonth = String(req.query.month || '');
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(rawMonth) ? rawMonth : null;
-  const sort = ['name', 'assigned', 'done', 'ontime', 'avg', 'overdue'].includes(req.query.sort) ? req.query.sort : 'name';
-  const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
-  return { projectId, month, sort, dir };
+  return { projectId, month };
 }
 
 function toastFrom(req) {

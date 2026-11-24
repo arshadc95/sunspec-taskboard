@@ -183,6 +183,30 @@ test('the workload grid shows the whole month, weekdays, open load, and finished
   assert.match(svg, /workload-future/);
 });
 
+test('a person with no tasks still appears in the manage people list', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-people-'));
+  const db = openDatabase(path.join(dir, 'board.sqlite'));
+  const busy = createUser(db, { email: 'busy@example.com', name: 'Sam Cole', password: 'password1', role: 'user' });
+  createUser(db, { email: 'quiet@example.com', name: 'Quiet Person', password: 'password1', role: 'user' });
+  createUser(db, { email: 'alex@example.com', name: 'Alex Kim', password: 'password1', role: 'admin' });
+  createTask(db, {
+    title: 'Open work',
+    description: '',
+    assigneeId: busy.id,
+    assigneeIds: [busy.id],
+    status: 'todo',
+    priority: null,
+    dueDate: null,
+    projectId: null,
+    createdBy: busy.id,
+  });
+  const board = buildManage(db, { now: new Date('2026-11-24T15:00:00+02:00') });
+  db.close();
+  assert.deepEqual(board.people.map((person) => person.name), ['Sam Cole', 'Alex Kim', 'Quiet Person']);
+  assert.equal(board.people.find((person) => person.name === 'Quiet Person').assigned, 0);
+  assert.deepEqual(board.heatmap.rows.map((row) => row.name), ['Sam Cole', 'Alex Kim', 'Quiet Person']);
+});
+
 test('one day of status data is a stacked bar, and a full month uses daily bars', () => {
   const days = Array.from({ length: 24 }, (_, index) => `11-${String(index + 1).padStart(2, '0')}`);
   const zeros = days.map(() => 0);
