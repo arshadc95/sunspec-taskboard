@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { PALETTE } from '../src/colors.js';
 import { createApp } from '../src/server.js';
 import { todayDate } from '../src/time.js';
 
@@ -153,9 +154,12 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.match(calendar.text, /Site visit/);
     assert.doesNotMatch(calendar.text, /info-btn/);
     const thabangColor = db.prepare("SELECT color FROM users WHERE email = 'thabang@example.com'").get().color;
-    assert.match(calendar.text, new RegExp(`class="chip[\\s\\S]*?class="swatch" style="background:${thabangColor}"[\\s\\S]*?Site visit`));
+    const thabangClass = `swatch c-${PALETTE.indexOf(thabangColor)}`;
+    assert.match(calendar.text, new RegExp(`class="chip[\\s\\S]*?class="${thabangClass}"[\\s\\S]*?Site visit`));
+    assert.doesNotMatch(calendar.text, / style=/);
     const week = await page(base, admin, `/calendar?view=week&day=${todayDate()}`);
-    assert.match(week.text, new RegExp(`class="swatch" style="background:${thabangColor}"[\\s\\S]*?Site visit`));
+    assert.match(week.text, new RegExp(`class="${thabangClass}"[\\s\\S]*?Site visit`));
+    assert.doesNotMatch(week.text, / style=/);
     const team = await page(base, admin, '/team');
     assert.match(team.text, /Thabang Madikgetla/);
     assert.match(team.text, /On time/);

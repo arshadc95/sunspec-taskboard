@@ -32,6 +32,12 @@ export function colorForUser(userId, stored) {
   return PALETTE[index];
 }
 
+export function colorClass(color, userId) {
+  const hex = colorForUser(userId, color);
+  const index = PALETTE.indexOf(hex);
+  return `c-${index < 0 ? 0 : index}`;
+}
+
 export function nextColor(used = []) {
   const counts = new Map(PALETTE.map((color) => [color, 0]));
   for (const color of used) {

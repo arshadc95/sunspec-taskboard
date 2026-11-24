@@ -93,9 +93,10 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     const listed = await page(base, admin.cookies, '/users');
     const people = db.prepare("SELECT id, color FROM users WHERE is_bot = 0").all();
     for (const person of people) {
-      assert.match(listed.text, new RegExp(`style="background:${person.color}"`));
+      assert.match(listed.text, /swatch c-/);
       assert.match(listed.text, new RegExp(`form="user-${person.id}" type="radio" name="color" value="${person.color}" checked`));
     }
+    assert.doesNotMatch(listed.text, / style=/);
     const form = await page(base, admin.cookies, '/tasks/new');
     const created = await post(base, admin.cookies, '/tasks', {
       _csrf: form.csrf,
@@ -153,6 +154,12 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(csvText, /yes/);
     assert.match(csvText.split('\n')[0], /(^|,)time(,|$)/i);
     assert.match(filtered.text, /<th>Time<\/th>/);
+    assert.match(filtered.text, /class="who"[\s\S]*swatch c-/);
+    assert.match(filtered.text, /<th>Assignee<\/th>[\s\S]*swatch c-/);
+    assert.doesNotMatch(filtered.text, / style=/);
+    const calendar = await page(base, admin.cookies, `/calendar?month=${shiftDate(todayDate(), -2).slice(0, 7)}`);
+    assert.match(calendar.text, /swatch c-/);
+    assert.doesNotMatch(calendar.text, / style=/);
     assert.doesNotMatch(filtered.text, /info-btn/);
     assert.doesNotMatch(mentions.text, /info-btn/);
     assert.match(detail.text, /<h2>Time<\/h2>/);
@@ -265,15 +272,15 @@ test('an old database without colours still shows dots', { timeout: 60000 }, asy
     const session = await login(base, 'lindi@example.com', 'old-password');
     assert.equal(session.res.status, 302);
     const home = await page(base, session.cookies, '/');
-    assert.match(home.text, /class="who"[\s\S]*class="swatch"[\s\S]*who-name">Lindi Nkosi/);
-    assert.match(home.text, /<th>Assignee<\/th>[\s\S]*class="swatch"[\s\S]*Lindi Nkosi/);
+    assert.match(home.text, /class="who"[\s\S]*class="swatch c-[\s\S]*who-name">Lindi Nkosi/);
+    assert.match(home.text, /<th>Assignee<\/th>[\s\S]*class="swatch c-[\s\S]*Lindi Nkosi/);
     const calendar = await page(base, session.cookies, '/calendar');
-    assert.match(calendar.text, /class="chip[^"]*"[\s\S]*class="swatch"[\s\S]*Roof check/);
+    assert.match(calendar.text, /class="chip[^"]*"[\s\S]*class="swatch c-[\s\S]*Roof check/);
 
     db.prepare("UPDATE users SET color = 'BLUE' WHERE email = 'lindi@example.com'").run();
     const again = await page(base, session.cookies, '/');
-    assert.match(again.text, /class="who"[\s\S]*class="swatch"[\s\S]*who-name">Lindi Nkosi/);
-    assert.match(again.text, /class="swatch"[\s\S]*Lindi Nkosi/);
+    assert.match(again.text, /class="who"[\s\S]*class="swatch c-[\s\S]*who-name">Lindi Nkosi/);
+    assert.match(again.text, /class="swatch c-[\s\S]*Lindi Nkosi/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
-import { PALETTE, colorForUser } from './colors.js';
+import { PALETTE, colorClass, colorForUser } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
 import { entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
 
@@ -34,7 +34,7 @@ function textBlock(value) {
 }
 
 function swatch(color, userId) {
-  return `<span class="swatch" style="background:${colorForUser(userId, color)}" aria-hidden="true"></span>`;
+  return `<span class="swatch ${colorClass(color, userId)}" aria-hidden="true"></span>`;
 }
 
 function nameLine(name, color, userId) {
@@ -720,8 +720,8 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
     return `<tr class="${person.active ? '' : 'inactive'}">
       <td>
         <div class="user-name">
-          <span class="swatch" style="background:${shown}" title="Colour"></span>
-          <span class="color-pick">${PALETTE.map((color) => `<label title="Colour"><input form="user-${person.id}" type="radio" name="color" value="${color}"${shown === color ? ' checked' : ''}><i class="swatch" style="background:${color}"></i></label>`).join('')}</span>
+          ${swatch(person.color, person.id)}
+          <span class="color-pick">${PALETTE.map((color, index) => `<label title="Colour"><input form="user-${person.id}" type="radio" name="color" value="${color}"${shown === color ? ' checked' : ''}><i class="swatch c-${index}"></i></label>`).join('')}</span>
           <input class="user-name-input" form="user-${person.id}" name="name" required maxlength="120" value="${esc(person.name)}">
         </div>
       </td>
@@ -1043,7 +1043,7 @@ function teamCard(row) {
       <div><span>Done this month</span><strong>${row.monthCount}</strong></div>
     </div>
     <p class="person-small"><span>${hoursLabel(row.monthHours)} this month</span><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
-    <div class="load-track" title="${row.open} open"><span style="width:${row.load || 0}%"></span></div>
+    <div class="load-track" title="${row.open} open"><span class="w-${Math.max(0, Math.min(100, Math.round(row.load || 0)))}"></span></div>
     ${list}
   </article>`;
 }

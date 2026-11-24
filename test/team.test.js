@@ -22,7 +22,7 @@ test('an empty team card does not show a table of zeros', () => {
   const html = page(teamBoard(db));
   db.close();
   assert.match(html, /Ada Lovelace/);
-  assert.match(html, /class="swatch"/);
+  assert.match(html, /class="swatch c-/);
   assert.match(html, /No open tasks/);
   assert.match(html, /No hours/);
   assert.match(html, /None yet/);
@@ -70,11 +70,12 @@ test('a team card lists the next three due tasks and the colour', () => {
   assert.equal(adaRow.overdue, 1);
   assert.equal(adaRow.upcoming.length, 3);
   assert.equal(adaRow.load, 100);
-  assert.match(html, new RegExp(`style="background:${adaRow.color}"`));
+  assert.match(html, /swatch c-/);
   assert.match(html, /Open<\/span><strong>5<\/strong>/);
   assert.match(html, /class="hot"[\s\S]*?<span>Overdue<\/span><strong>1<\/strong>/);
   assert.match(html, /Done this month<\/span><strong>1<\/strong>/);
-  assert.match(html, /style="width:100%"/);
+  assert.match(html, /class="w-100"/);
+  assert.doesNotMatch(html, / style=/);
   assert.match(html, /href="\/tasks\/\d+">Overdue meter</);
   assert.match(html, /class="late"/);
   assert.match(html, /Soon visit/);
