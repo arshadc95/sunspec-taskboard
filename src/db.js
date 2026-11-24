@@ -1195,8 +1195,9 @@ export function teamBoard(db, now = Date.now()) {
   const today = todayDate(moment);
   const weekIso = startOfWeekIso(moment);
   const monthIso = startOfMonthIso(moment);
-  const people = db.prepare("SELECT id, name, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE").all();
+  const people = db.prepare("SELECT id, name, role, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE").all();
   const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
+  const openTasks = db.prepare("SELECT id, title, due_date, status FROM tasks WHERE status != 'done' AND deleted_at IS NULL").all();
   const members = new Map();
   for (const link of db.prepare('SELECT task_id, user_id FROM task_assignees').all()) {
     if (!members.has(link.task_id)) members.set(link.task_id, []);
@@ -1208,7 +1209,7 @@ export function teamBoard(db, now = Date.now()) {
     JOIN tasks t ON t.id = te.task_id
     WHERE t.deleted_at IS NULL
   `).all();
-  return people.map((person) => {
+  const rows = people.map((person) => {
     const mine = done.filter((task) => {
       const ids = members.get(task.id) || [];
       if (!ids.length) return task.created_by === person.id;
@@ -1238,18 +1239,37 @@ export function teamBoard(db, now = Date.now()) {
       }
     }
     const userEntries = entries.filter((entry) => entry.user_id === person.id);
+    const mineOpen = openTasks.filter((task) => (members.get(task.id) || []).includes(person.id));
+    const upcoming = mineOpen
+      .filter((task) => task.due_date)
+      .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.id - b.id)
+      .slice(0, 3)
+      .map((task) => ({
+        id: task.id,
+        title: task.title,
+        due: task.due_date,
+        late: task.due_date < today,
+      }));
     return {
       id: person.id,
       name: person.name,
+      role: person.role,
       color: colorForUser(person.id, person.color),
+      open: mineOpen.length,
+      overdue: mineOpen.filter((task) => task.due_date && task.due_date < today).length,
       weekCount,
       monthCount,
       weekHours: hoursFrom(userEntries, weekIso, now),
       monthHours: hoursFrom(userEntries, monthIso, now),
       onTimePercent: withDue ? Math.round((onTime / withDue) * 100) : null,
       streak,
+      upcoming,
     };
-  }).sort((a, b) => b.weekCount - a.weekCount || b.monthCount - a.monthCount || a.name.localeCompare(b.name));
+  });
+  const maxOpen = rows.reduce((max, row) => Math.max(max, row.open), 0);
+  return rows
+    .map((row) => ({ ...row, load: maxOpen ? Math.round((row.open / maxOpen) * 100) : 0 }))
+    .sort((a, b) => b.open - a.open || a.name.localeCompare(b.name));
 }
 
 const GROK_EMAIL = 'grok@taskboard.local';

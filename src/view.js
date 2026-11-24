@@ -1014,24 +1014,44 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
   });
 }
 
+function hoursLabel(value) {
+  if (!value) return 'No hours';
+  return `${value}h`;
+}
+
+function onTimeLabel(value) {
+  if (value == null) return 'None yet';
+  return `${value}%`;
+}
+
+function streakLabel(value) {
+  if (!value) return 'No streak';
+  return value === 1 ? '1 day' : `${value} days`;
+}
+
+function teamCard(row) {
+  const tasks = row.upcoming || [];
+  const list = row.open
+    ? (tasks.length
+      ? `<ul class="person-due">${tasks.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <time class="${task.late ? 'late' : ''}">${esc(formatDue(task.due))}</time></li>`).join('')}</ul>`
+      : '<p class="person-empty">No due dates</p>')
+    : '<p class="person-empty">No open tasks</p>';
+  return `<article class="person-card">
+    <h2>${nameLine(row.name, row.color, row.id)}${roleBadge(row.role)}</h2>
+    <div class="person-nums">
+      <div><span>Open</span><strong>${row.open}</strong></div>
+      <div class="${row.overdue ? 'hot' : ''}"><span>Overdue</span><strong>${row.overdue}</strong></div>
+      <div><span>Done this month</span><strong>${row.monthCount}</strong></div>
+    </div>
+    <p class="person-small"><span>${hoursLabel(row.monthHours)} this month</span><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
+    <div class="load-track" title="${row.open} open"><span style="width:${row.load || 0}%"></span></div>
+    ${list}
+  </article>`;
+}
+
 export function renderTeam({ user, csrf, rows }) {
   const body = `
-    ${sheet('Team', `<div class="table-wrap">
-      <table class="grid">
-        <thead><tr><th>Person</th><th class="num">Done this week</th><th class="num">Done this month</th><th class="num">Hours this week</th><th class="num">Hours this month</th><th class="num">On time</th><th class="num">Streak</th></tr></thead>
-        <tbody>
-          ${rows.length ? rows.map((row) => `<tr>
-            <td>${nameLine(row.name, row.color, row.id)}</td>
-            <td class="num">${row.weekCount}</td>
-            <td class="num">${row.monthCount}</td>
-            <td class="num">${row.weekHours}</td>
-            <td class="num">${row.monthHours}</td>
-            <td class="num">${row.onTimePercent === null ? '—' : `${row.onTimePercent}%`}</td>
-            <td class="num">${row.streak}</td>
-          </tr>`).join('') : '<tr><td colspan="7">No active people yet.</td></tr>'}
-        </tbody>
-      </table>
-    </div>`, true)}`;
+    ${sheet('Team', rows.length ? `<div class="team-grid">${rows.map((row) => teamCard(row)).join('')}</div>` : '<p class="hint">No active people yet.</p>')}`;
   return layout({
     title: 'Team · Sunspec',
     user,

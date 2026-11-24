@@ -851,6 +851,31 @@ td.num.late { color: #dc2626; font-weight: 700; }
   .cal-agenda { display: block; }
 }
 
+.team-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.person-card { display: flex; flex-direction: column; min-height: 100%; background: #fff; border: 1px solid var(--line); }
+.person-card h2 { margin: 0; padding: 10px 12px; background: #000; color: #fff; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+.person-card h2 .badge { margin-left: auto; }
+.person-card h2 .role-superuser { border: 1px solid #fff; }
+.person-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 12px; }
+.person-nums div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.person-nums span { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #555; }
+.person-nums strong { font-size: 28px; line-height: 1; }
+.person-nums .hot strong { color: #dc2626; }
+.person-small { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 0; padding: 0 12px 10px; color: #555; font-size: 12px; }
+.load-track { height: 4px; margin: 0 12px 10px; background: #eee; }
+.load-track span { display: block; height: 4px; background: #f97316; }
+.person-due { list-style: none; margin: 0; padding: 0 12px 12px; flex: 1; min-height: 4.8em; }
+.person-due li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid #eee; font-size: 12px; }
+.person-due a { font-weight: 600; text-decoration: none; min-width: 0; }
+.person-due time { color: #555; white-space: nowrap; }
+.person-due .late { color: #dc2626; font-weight: 700; }
+.person-empty { margin: 0; padding: 0 12px 12px; color: #555; font-size: 12px; flex: 1; min-height: 4.8em; }
+@media (max-width: 1200px) {
+  .team-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 800px) {
+  .team-grid { grid-template-columns: 1fr; }
+}
 .grok { position: fixed; z-index: 40; }
 .grok-bubble {
   position: fixed;
