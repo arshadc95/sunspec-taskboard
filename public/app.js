@@ -1,4 +1,5 @@
 import { applyGrokClick } from './grok-panel.js';
+import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
 document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
   document.body.classList.toggle('nav-open');
@@ -31,31 +32,31 @@ if (standardRoot && standardList.length) {
   const code = standardRoot.querySelector('[data-std-code]');
   const title = standardRoot.querySelector('[data-std-title]');
   const why = standardRoot.querySelector('[data-std-why]');
-  const deck = [
-    ...standardList.filter((item) => item.kind !== 'concept'),
-    ...standardList.filter((item) => item.kind === 'concept'),
-  ];
-  const standardCount = Math.max(1, deck.filter((item) => item.kind !== 'concept').length);
-  let index = 0;
-  const show = (next, remember) => {
-    index = (next + deck.length) % deck.length;
-    const item = deck[index];
+  const deckKey = 'std-deck';
+  const readDeck = () => {
+    try { return JSON.parse(localStorage.getItem(deckKey) || 'null'); } catch { return null; }
+  };
+  const writeDeck = (deck) => {
+    try { localStorage.setItem(deckKey, JSON.stringify({ order: deck.order, pos: deck.pos })); } catch { /* private mode */ }
+  };
+  let deck = openStandardsDeck(standardList, readDeck());
+  const show = () => {
+    const item = cardAt(standardList, deck);
+    if (!item) return;
     if (title) title.textContent = item.title;
     if (code) code.textContent = item.code;
     if (why) why.textContent = item.why;
-    if (remember) {
-      try { localStorage.setItem('std-last', item.id); } catch { /* private mode */ }
-    }
+    writeDeck(deck);
   };
-  let last = '';
-  try { last = localStorage.getItem('std-last') || ''; } catch { /* private mode */ }
-  let start = Math.floor(Math.random() * standardCount);
-  if (standardCount > 1 && deck[start].id === last) {
-    start = (start + 1 + Math.floor(Math.random() * (standardCount - 1))) % standardCount;
-  }
-  show(start, true);
-  standardRoot.querySelector('[data-std-prev]')?.addEventListener('click', () => show(index - 1, true));
-  standardRoot.querySelector('[data-std-next]')?.addEventListener('click', () => show(index + 1, true));
+  show();
+  standardRoot.querySelector('[data-std-prev]')?.addEventListener('click', () => {
+    deck = moveStandardsDeck(standardList, deck, -1);
+    show();
+  });
+  standardRoot.querySelector('[data-std-next]')?.addEventListener('click', () => {
+    deck = moveStandardsDeck(standardList, deck, 1);
+    show();
+  });
 }
 
 function formatElapsed(startedAt) {
