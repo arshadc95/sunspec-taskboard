@@ -1,4 +1,4 @@
-import { acceptGrokFiles, applyGrokClick, grokFileView, grokQueuedLabel, grokShouldQueue, grokThreadVisible } from './grok-panel.js';
+import { acceptGrokFiles, applyGrokClick, grokFileView, grokMessageBlocks, grokQueuedLabel, grokShouldQueue, grokThreadVisible } from './grok-panel.js';
 import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
 document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
@@ -629,11 +629,40 @@ if (grokRoot) {
     return row;
   }
 
+  function renderInlines(parts) {
+    const fragment = document.createDocumentFragment();
+    parts.forEach((part) => {
+      if (part.type === 'bold') {
+        const strong = document.createElement('strong');
+        strong.textContent = part.text;
+        fragment.append(strong);
+      } else fragment.append(document.createTextNode(part.text));
+    });
+    return fragment;
+  }
+
   function messageBubble(role, text) {
-    const line = document.createElement('p');
-    line.className = role === 'user' ? 'grok-mine' : 'grok-theirs';
-    line.textContent = text;
-    return line;
+    const box = document.createElement('div');
+    box.className = role === 'user' ? 'grok-mine' : 'grok-theirs';
+    grokMessageBlocks(text).forEach((block) => {
+      if (block.type === 'p') {
+        const paragraph = document.createElement('p');
+        block.lines.forEach((line, index) => {
+          if (index) paragraph.append(document.createElement('br'));
+          paragraph.append(renderInlines(line));
+        });
+        box.append(paragraph);
+      } else {
+        const list = document.createElement(block.type);
+        block.items.forEach((item) => {
+          const li = document.createElement('li');
+          li.append(renderInlines(item));
+          list.append(li);
+        });
+        box.append(list);
+      }
+    });
+    return box;
   }
 
   function ackNode(live) {
@@ -685,12 +714,14 @@ if (grokRoot) {
     icon.className = 'grok-file-icon';
     icon.textContent = 'PDF';
     const meta = document.createElement('div');
+    meta.className = 'grok-file-meta';
     const title = document.createElement('strong');
     title.textContent = view.name;
     const detail = document.createElement('p');
     detail.textContent = [view.sizeLabel, view.expiry].filter(Boolean).join(' · ');
     meta.append(title, detail);
     const actions = document.createElement('div');
+    actions.className = 'grok-file-actions';
     const openFile = document.createElement('button');
     openFile.type = 'button';
     openFile.textContent = 'Open';
@@ -751,51 +782,30 @@ if (grokRoot) {
   function renderThreads() {
     if (!list) return;
     const query = searchChats?.value || '';
-    const appMode = grokRoot.classList.contains('is-full');
     list.innerHTML = '';
     const shown = threads.filter((thread) => grokThreadVisible(thread, query));
     shown.forEach((thread) => {
       const row = document.createElement('div');
       row.className = `grok-chat${Number(thread.id) === Number(threadId) ? ' is-current' : ''}`;
-      if (appMode) {
-        const openChat = document.createElement('button');
-        openChat.type = 'button';
-        openChat.className = 'grok-chat-main';
-        const title = document.createElement('strong');
-        title.textContent = thread.title || 'New chat';
-        const preview = document.createElement('span');
-        preview.textContent = thread.preview || 'No messages yet';
-        openChat.append(title, preview);
-        openChat.addEventListener('click', () => {
-          switchThread(thread.id);
-          if (drawerMode()) toggleList(false);
-        });
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'grok-chat-x';
-        remove.setAttribute('aria-label', 'Delete chat');
-        remove.textContent = '×';
-        remove.addEventListener('click', () => deleteThread(thread.id));
-        row.append(openChat, remove);
-      } else {
-        const title = document.createElement('input');
-        title.value = thread.title || '';
-        title.placeholder = 'New chat';
-        title.setAttribute('aria-label', 'Chat title');
-        title.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter') { event.preventDefault(); title.blur(); }
-        });
-        title.addEventListener('change', () => renameThread(thread.id, title.value));
-        const openChat = document.createElement('button');
-        openChat.type = 'button';
-        openChat.textContent = 'Open';
-        openChat.addEventListener('click', () => { switchThread(thread.id); toggleList(false); });
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.textContent = 'Delete';
-        remove.addEventListener('click', () => deleteThread(thread.id));
-        row.append(title, openChat, remove);
-      }
+      const openChat = document.createElement('button');
+      openChat.type = 'button';
+      openChat.className = 'grok-chat-main';
+      const title = document.createElement('strong');
+      title.textContent = thread.title || 'New chat';
+      const preview = document.createElement('span');
+      preview.textContent = thread.preview || 'No messages yet';
+      openChat.append(title, preview);
+      openChat.addEventListener('click', () => {
+        switchThread(thread.id);
+        if (!full || drawerMode()) toggleList(false);
+      });
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'grok-chat-x';
+      remove.setAttribute('aria-label', 'Delete chat');
+      remove.textContent = '×';
+      remove.addEventListener('click', () => deleteThread(thread.id));
+      row.append(openChat, remove);
       list.append(row);
     });
     if (!shown.length) {
@@ -878,8 +888,8 @@ if (grokRoot) {
     const button = grokRoot.querySelector('[data-grok-full]');
     if (button) {
       button.setAttribute('aria-pressed', full ? 'true' : 'false');
-      button.textContent = full ? 'Exit' : 'Full';
       button.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
+      button.title = full ? 'Exit full screen' : 'Full screen';
     }
     const drawer = drawerMode();
     if (collapseList || (drawer && !sawDrawer)) listOpen = false;

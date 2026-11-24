@@ -154,13 +154,21 @@ function grokWidget(user, csrf) {
     </button>
     <section class="grok-panel" hidden>
       <header class="grok-head">
-        <button type="button" data-grok-chats>Chats</button>
-        <strong data-grok-brand>Grok</strong>
+        <button type="button" data-grok-chats aria-label="Chats" title="Chats">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
         <input class="grok-title" data-grok-title maxlength="80" placeholder="New chat" aria-label="Chat title" autocomplete="off">
-        <button type="button" data-grok-sound aria-pressed="true">Sound</button>
-        <button type="button" data-grok-new>+ New chat</button>
-        <button type="button" data-grok-full aria-pressed="false" aria-label="Full screen">Full</button>
-        <button type="button" data-grok-close aria-label="Close">×</button>
+        <button type="button" data-grok-new aria-label="New chat" title="New chat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button type="button" data-grok-sound aria-pressed="true" aria-label="Sound" title="Sound">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z" fill="none" stroke="currentColor" stroke-width="2"/><path class="sound-wave" d="M16 9a4 4 0 0 1 0 6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button type="button" data-grok-full aria-pressed="false" aria-label="Full screen" title="Full screen">
+          <svg class="icon-full" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          <svg class="icon-exit" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button type="button" data-grok-close aria-label="Close" title="Close">×</button>
       </header>
       <div class="grok-body">
         <div class="grok-chats" data-grok-list hidden>

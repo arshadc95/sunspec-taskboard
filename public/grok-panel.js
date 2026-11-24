@@ -70,6 +70,57 @@ export function grokThreadVisible(thread, query) {
   return title.includes(q) || preview.includes(q);
 }
 
+function grokInline(text) {
+  const parts = [];
+  const pattern = /\*\*([^*]+)\*\*|__([^_]+)__/g;
+  let last = 0;
+  let match = pattern.exec(text);
+  while (match) {
+    if (match.index > last) parts.push({ type: 'text', text: text.slice(last, match.index) });
+    parts.push({ type: 'bold', text: match[1] || match[2] });
+    last = match.index + match[0].length;
+    match = pattern.exec(text);
+  }
+  if (last < text.length) parts.push({ type: 'text', text: text.slice(last) });
+  return parts.filter((part) => part.text);
+}
+
+export function grokMessageBlocks(source) {
+  const lines = String(source || '').replace(/\r\n/g, '\n').split('\n');
+  const blocks = [];
+  let paragraph = [];
+  const flush = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: 'p', lines: paragraph.map(grokInline) });
+    paragraph = [];
+  };
+  const bullet = (line) => /^\s*[-*]\s+\S/.test(line);
+  const numbered = (line) => /^\s*\d+[.)]\s+\S/.test(line);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+    if (bullet(line) || numbered(line)) {
+      flush();
+      const kind = bullet(line) ? 'ul' : 'ol';
+      const test = kind === 'ul' ? bullet : numbered;
+      const items = [];
+      while (i < lines.length && test(lines[i])) {
+        items.push(grokInline(lines[i].replace(kind === 'ul' ? /^\s*[-*]\s+/ : /^\s*\d+[.)]\s+/, '')));
+        i += 1;
+      }
+      i -= 1;
+      blocks.push({ type: kind, items });
+      continue;
+    }
+    paragraph.push(line);
+  }
+  flush();
+  return blocks;
+}
+
 export function grokQueuedLabel(item) {
   const names = (item?.files || []).map((file) => file.name).filter(Boolean).join(', ');
   const body = [String(item?.text || '').trim(), names].filter(Boolean).join(' · ');
