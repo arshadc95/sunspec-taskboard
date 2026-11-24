@@ -98,6 +98,7 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.match(opened.text, /Thabang Madikgetla/);
 
     const board = await page(base, thabang, '/');
+    assert.doesNotMatch(board.text, /row-remove/);
     assert.match(board.text, /data-live/);
     assert.match(board.text, /My day/);
     assert.doesNotMatch(board.text, />Apply</);

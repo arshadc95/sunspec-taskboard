@@ -335,7 +335,7 @@ function taskCard(task, today, user, csrf, back) {
       <span class="time">${timerMark(task, user)}${time}${rowTimer(task, user, csrf, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
-    <div class="card-actions">${removeControl(task, user, csrf, back)}${completeControl(task, user, csrf, back)}</div>
+    <div class="card-actions">${completeControl(task, user, csrf, back)}</div>
   </article>`;
 }
 
@@ -343,7 +343,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
   const overdue = isOverdue(task.due_date, task.status, today);
   const added = String(highlight || '') === String(task.id);
   return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <td class="task-cell"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
+    <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
     <td>${esc(task.project_name || '—')}</td>
     <td>${esc(task.assignee_name || '—')}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
@@ -352,7 +352,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     ${timeCell(task, user, csrf, back)}
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
-    <td class="row-actions">${removeControl(task, user, csrf, back)}${completeControl(task, user, csrf, back)}</td>
+    <td class="row-actions">${completeControl(task, user, csrf, back)}</td>
   </tr>`;
 }
 
