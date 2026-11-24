@@ -118,6 +118,7 @@ test('task timers', { timeout: 60000 }, async () => {
       password: 'lindi-password',
       role: 'user',
     });
+    const lindiId = db.prepare("SELECT id FROM users WHERE email = 'lindi@example.com'").get().id;
     const lindi = await login(base, 'lindi@example.com', 'lindi-password');
     const form = await page(base, lindi.cookies, '/tasks/new');
     const first = await post(base, lindi.cookies, '/tasks', {
@@ -127,7 +128,7 @@ test('task timers', { timeout: 60000 }, async () => {
       status: 'todo',
       priority: '',
       due_date: '',
-      assignee_id: '',
+      assignee_id: String(lindiId),
       project_id: '',
       new_project: 'Tubecon',
     });
@@ -139,7 +140,7 @@ test('task timers', { timeout: 60000 }, async () => {
       status: 'todo',
       priority: '',
       due_date: '',
-      assignee_id: '',
+      assignee_id: String(lindiId),
       project_id: '',
       new_project: '',
     });
@@ -167,14 +168,13 @@ test('task timers', { timeout: 60000 }, async () => {
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM time_entries WHERE ended_at IS NULL AND user_id = (SELECT id FROM users WHERE email = 'lindi@example.com')").get().n, 1);
 
     const also = await post(base, admin.cookies, `/tasks/${secondId}/timer/start`, { _csrf: users.csrf });
-    assert.equal(also.status, 302);
-    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM time_entries WHERE task_id = ? AND ended_at IS NULL').get(secondId).n, 2);
+    assert.equal(also.status, 403);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM time_entries WHERE task_id = ? AND ended_at IS NULL').get(secondId).n, 1);
 
     const stopped = await post(base, lindi.cookies, `/tasks/${secondId}/timer/stop`, { _csrf: form.csrf });
     assert.equal(stopped.status, 302);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM time_entries WHERE ended_at IS NULL AND user_id = (SELECT id FROM users WHERE email = 'lindi@example.com')").get().n, 0);
 
-    const lindiId = db.prepare("SELECT id FROM users WHERE email = 'lindi@example.com'").get().id;
     const done = await post(base, admin.cookies, '/tasks', {
       _csrf: users.csrf,
       title: 'Finished install',

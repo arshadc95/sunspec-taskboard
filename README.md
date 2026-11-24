@@ -132,3 +132,15 @@ Due dates are calendar dates in Africa/Johannesburg. A task is overdue when its 
 A task can belong to a project (type a new name such as Tubecon on the task form) and a priority of Low, Med, High, or Urgent. Filter the board by project. Comments can mention a person with `@Their Name`; the Mentions filter lists tasks where you were mentioned. Status, assignee, and due-date changes are kept on the task. Files up to 10 MB are stored in `DATA_DIR/uploads` and can only be downloaded by someone who is signed in. CSV downloads the tasks that match the current filters. Manage, for superusers and admins, shows open, overdue, and completed work per person, plus time spent by person, project, and task and the average time on completed tasks. On a task, Start begins a time entry for you and Stop ends it. Only one timer runs per person; starting another stops the previous one. Starting a timer on a To Do task moves it to In Progress. On a narrow screen the task table becomes cards and the orange bar along the bottom replaces the sidebar. Click a task title, or anywhere else on its row, to open it.
 
 The database is migrated when the process starts. An update is still `git pull`, `npm ci --omit=dev`, and `systemctl restart sunspec-taskboard`. No new settings are required.
+
+## Holiday theme
+
+The Christmas theme is always on. It is only `public/themes/christmas.css`, `public/themes/christmas.js`, and one line in `src/view.js`:
+
+```html
+<script src="/themes/christmas.js" defer></script>
+```
+
+To turn it off, delete `public/themes/` and that line, then restart. Nothing else references it.
+
+Press N to open the new-task drawer. Enter in the add row creates a To Do task. Complete (✓) is available to the assignee, the creator, and admins. Only the assignee can start or stop a timer. Mentions use `@[Name](id)` from the picker so names with spaces stay attached to the person. The Team page shows the week and month leaderboard.

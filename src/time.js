@@ -67,6 +67,24 @@ export function daysAgoIso(days, now = new Date()) {
   return new Date(now.getTime() - days * 86400000).toISOString();
 }
 
+export function shiftDate(ymd, days) {
+  const [year, month, day] = ymd.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function dateInJohannesburg(iso, nowFallback) {
+  const date = iso ? new Date(iso) : nowFallback;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return todayDate(date);
+}
+
+export function startOfMonthIso(now = new Date()) {
+  const [year, month] = todayDate(now).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, 1, -2, 0, 0)).toISOString();
+}
+
 export function entrySeconds(startedAt, endedAt, now = Date.now()) {
   const start = Date.parse(startedAt);
   const end = endedAt ? Date.parse(endedAt) : now;

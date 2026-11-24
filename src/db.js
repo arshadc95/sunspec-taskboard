@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { hashPassword } from './passwords.js';
-import { entrySeconds } from './time.js';
+import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, todayDate } from './time.js';
 
 export function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -114,6 +114,31 @@ function migrate(db) {
 
     CREATE INDEX IF NOT EXISTS idx_time_task ON time_entries(task_id);
     CREATE INDEX IF NOT EXISTS idx_time_user_open ON time_entries(user_id, ended_at);
+
+    CREATE TABLE IF NOT EXISTS task_mentions (
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      PRIMARY KEY (task_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS mention_notices (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      read_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mention_notices_user ON mention_notices(user_id, read_at);
+
+    CREATE TABLE IF NOT EXISTS kudos (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      target_type TEXT NOT NULL CHECK (target_type IN ('comment', 'task')),
+      target_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (user_id, target_type, target_id)
+    );
   `);
   const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
   if (!taskColumns.some((column) => column.name === 'project_id')) {
@@ -280,13 +305,23 @@ export function listTasks(db, filters) {
     where.push('t.project_id = ?');
     params.push(filters.projectId);
   }
+  if (filters.due) {
+    where.push('t.due_date = ?');
+    params.push(filters.due);
+  }
   if (filters.mentionUserId) {
-    where.push(`EXISTS (
-      SELECT 1 FROM comments cm
-      JOIN comment_mentions mn ON mn.comment_id = cm.id
-      WHERE cm.task_id = t.id AND mn.user_id = ?
+    where.push(`(
+      EXISTS (
+        SELECT 1 FROM comments cm
+        JOIN comment_mentions mn ON mn.comment_id = cm.id
+        WHERE cm.task_id = t.id AND mn.user_id = ?
+      )
+      OR EXISTS (
+        SELECT 1 FROM task_mentions tm
+        WHERE tm.task_id = t.id AND tm.user_id = ?
+      )
     )`);
-    params.push(filters.mentionUserId);
+    params.push(filters.mentionUserId, filters.mentionUserId);
   }
   if (filters.search) {
     where.push("(t.title LIKE ? ESCAPE '\\' OR IFNULL(t.description, '') LIKE ? ESCAPE '\\' OR IFNULL(p.name, '') LIKE ? ESCAPE '\\')");
@@ -746,4 +781,153 @@ export function timeReport(db, filters, now = Date.now()) {
     completedWithTime: timed.length,
     completedCount: doneIds.size,
   };
+}
+
+export function activeUserIds(db, ids) {
+  const found = [];
+  const lookup = db.prepare('SELECT id FROM users WHERE id = ? AND active = 1');
+  for (const id of ids) {
+    const row = lookup.get(id);
+    if (row) found.push(row.id);
+  }
+  return found;
+}
+
+export function setTaskMentions(db, taskId, userIds) {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM task_mentions WHERE task_id = ?').run(taskId);
+    const insert = db.prepare('INSERT OR IGNORE INTO task_mentions (task_id, user_id) VALUES (?, ?)');
+    for (const userId of userIds) insert.run(taskId, userId);
+  });
+  tx();
+}
+
+export function notifyMentions(db, { taskId, userIds, actorId }) {
+  const now = new Date().toISOString();
+  const existing = db.prepare('SELECT id FROM mention_notices WHERE user_id = ? AND task_id = ? AND read_at IS NULL');
+  const insert = db.prepare('INSERT INTO mention_notices (user_id, task_id, created_at) VALUES (?, ?, ?)');
+  for (const userId of userIds) {
+    if (!userId || userId === actorId) continue;
+    if (existing.get(userId, taskId)) continue;
+    insert.run(userId, taskId, now);
+  }
+}
+
+export function unreadMentionCount(db, userId) {
+  return db.prepare('SELECT COUNT(DISTINCT task_id) AS n FROM mention_notices WHERE user_id = ? AND read_at IS NULL').get(userId).n;
+}
+
+export function markMentionsRead(db, userId, taskId) {
+  db.prepare('UPDATE mention_notices SET read_at = ? WHERE user_id = ? AND task_id = ? AND read_at IS NULL').run(
+    new Date().toISOString(),
+    userId,
+    taskId,
+  );
+}
+
+export function stopTimersOnTask(db, taskId) {
+  const now = new Date().toISOString();
+  const running = db.prepare('SELECT * FROM time_entries WHERE task_id = ? AND ended_at IS NULL').all(taskId);
+  if (running.length) {
+    db.prepare('UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL').run(now, taskId);
+  }
+  return running;
+}
+
+export function kudosSummary(db, userId, targetType, ids) {
+  const counts = new Map();
+  const mine = new Set();
+  if (!ids.length) return { counts, mine };
+  const marks = ids.map(() => '?').join(',');
+  for (const row of db.prepare(`SELECT target_id, COUNT(*) AS n FROM kudos WHERE target_type = ? AND target_id IN (${marks}) GROUP BY target_id`).all(targetType, ...ids)) {
+    counts.set(row.target_id, row.n);
+  }
+  for (const row of db.prepare(`SELECT target_id FROM kudos WHERE user_id = ? AND target_type = ? AND target_id IN (${marks})`).all(userId, targetType, ...ids)) {
+    mine.add(row.target_id);
+  }
+  return { counts, mine };
+}
+
+export function toggleKudo(db, { userId, targetType, targetId }) {
+  const existing = db.prepare('SELECT id FROM kudos WHERE user_id = ? AND target_type = ? AND target_id = ?').get(userId, targetType, targetId);
+  if (existing) {
+    db.prepare('DELETE FROM kudos WHERE id = ?').run(existing.id);
+    return false;
+  }
+  db.prepare('INSERT INTO kudos (user_id, target_type, target_id, created_at) VALUES (?, ?, ?, ?)').run(
+    userId,
+    targetType,
+    targetId,
+    new Date().toISOString(),
+  );
+  return true;
+}
+
+export function myDay(db, userId, today) {
+  const open = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status != 'done'").get(userId).n;
+  const dueToday = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status != 'done' AND due_date = ?").get(userId, today).n;
+  const timer = db.prepare(`
+    SELECT te.task_id, te.started_at, t.title
+    FROM time_entries te
+    JOIN tasks t ON t.id = te.task_id
+    WHERE te.user_id = ? AND te.ended_at IS NULL
+  `).get(userId) || null;
+  return { open, dueToday, timer };
+}
+
+function hoursFrom(entries, sinceIso, now) {
+  let seconds = 0;
+  const since = Date.parse(sinceIso);
+  for (const entry of entries) {
+    if (Date.parse(entry.started_at) < since) continue;
+    seconds += entrySeconds(entry.started_at, entry.ended_at, now);
+  }
+  return Math.round((seconds / 3600) * 10) / 10;
+}
+
+export function teamBoard(db, now = Date.now()) {
+  const moment = new Date(now);
+  const today = todayDate(moment);
+  const weekIso = startOfWeekIso(moment);
+  const monthIso = startOfMonthIso(moment);
+  const people = db.prepare("SELECT id, name FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE").all();
+  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL").all();
+  const entries = db.prepare('SELECT user_id, started_at, ended_at FROM time_entries').all();
+  return people.map((person) => {
+    const mine = done.filter((task) => task.assignee_id === person.id || (!task.assignee_id && task.created_by === person.id));
+    const completedDates = new Set();
+    let weekCount = 0;
+    let monthCount = 0;
+    let onTime = 0;
+    let withDue = 0;
+    for (const task of mine) {
+      const day = dateInJohannesburg(task.completed_at);
+      if (day) completedDates.add(day);
+      if (task.completed_at >= weekIso) weekCount += 1;
+      if (task.completed_at >= monthIso) monthCount += 1;
+      if (task.due_date) {
+        withDue += 1;
+        if (day && day <= task.due_date) onTime += 1;
+      }
+    }
+    let streak = 0;
+    let cursor = completedDates.has(today) ? today : shiftDate(today, -1);
+    if (completedDates.has(cursor)) {
+      while (completedDates.has(cursor)) {
+        streak += 1;
+        cursor = shiftDate(cursor, -1);
+      }
+    }
+    const userEntries = entries.filter((entry) => entry.user_id === person.id);
+    return {
+      id: person.id,
+      name: person.name,
+      weekCount,
+      monthCount,
+      weekHours: hoursFrom(userEntries, weekIso, now),
+      monthHours: hoursFrom(userEntries, monthIso, now),
+      onTimePercent: withDue ? Math.round((onTime / withDue) * 100) : null,
+      streak,
+    };
+  }).sort((a, b) => b.weekCount - a.weekCount || b.monthCount - a.monthCount || a.name.localeCompare(b.name));
 }

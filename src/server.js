@@ -41,28 +41,40 @@ import {
   getProject,
   listActivity,
   listAttachments,
+  activeUserIds,
+  kudosSummary,
   listProjects,
   listRunningTimers,
   listTimeEntries,
   getRunningTimer,
+  markMentionsRead,
+  myDay,
   managementReport,
+  notifyMentions,
   setCommentMentions,
+  setTaskMentions,
   startTimer,
   stopTimer,
+  stopTimersOnTask,
+  teamBoard,
   timeReport,
   timeTotals,
+  toggleKudo,
+  unreadMentionCount,
 } from './db.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
-import { canDeleteComment, canDeleteTask, canEditTask, canEditUser, isStaff } from './permissions.js';
+import { canCompleteTask, canControlTimer, canDeleteComment, canDeleteTask, canEditTask, canEditUser, isStaff } from './permissions.js';
 import { daysAgoIso, entrySeconds, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
 import {
   renderBoard,
+  renderCalendar,
   renderForbidden,
   renderLogin,
   renderManage,
   renderNotFound,
   renderTask,
+  renderTeam,
   renderUsers,
 } from './view.js';
 
@@ -248,6 +260,7 @@ export function createApp(config) {
     const row = sessionId ? getSessionUser(db, sessionId) : null;
     req.sessionId = row ? sessionId : null;
     req.user = row ? publicUser(row) : null;
+    if (req.user) req.user.unreadMentions = unreadMentionCount(db, req.user.id);
     next();
   });
 
@@ -305,19 +318,77 @@ export function createApp(config) {
 
   app.get('/', requireUser, (req, res) => {
     const filters = readFilters(req);
-    const tasks = listTasks(db, filters);
+    const tasks = withTime(db, listTasks(db, filters));
+    const people = listActiveUsers(db);
     html(res, 200, renderBoard({
       user: req.user,
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
-      tasks: withTime(db, tasks),
+      tasks,
       filters,
-      users: listActiveUsers(db),
+      users: people,
       projects: listProjects(db),
       counts: boardCounts(db, filters.today),
       today: filters.today,
       exportQuery: filterQuery(filters),
+      day: myDay(db, req.user.id, filters.today),
+      highlight: numericId(req.query.highlight),
+      openForm: req.query.newtask === '1',
+      toast: toastFrom(req),
     }));
+  });
+
+  app.get('/calendar', requireUser, (req, res) => {
+    const filters = readFilters(req);
+    const today = filters.today;
+    const view = req.query.view === 'week' ? 'week' : 'month';
+    const anchor = isValidDate(String(req.query.day || '')) ? String(req.query.day) : today;
+    let year = Number(today.slice(0, 4));
+    let month = Number(today.slice(5, 7));
+    const monthMatch = /^(\d{4})-(\d{2})$/.exec(String(req.query.month || ''));
+    if (monthMatch) {
+      year = Number(monthMatch[1]);
+      month = Number(monthMatch[2]);
+    }
+    const tasks = listTasks(db, { ...filters, search: '', overdue: false, mentions: false, mentionUserId: null });
+    html(res, 200, renderCalendar({
+      user: req.user,
+      csrf: ensureCsrf(req, res),
+      msg: String(req.query.msg || ''),
+      tasks,
+      filters,
+      users: listActiveUsers(db),
+      projects: listProjects(db),
+      today,
+      view,
+      year,
+      month,
+      anchor,
+    }));
+  });
+
+  app.get('/team', requireUser, (req, res) => {
+    html(res, 200, renderTeam({
+      user: req.user,
+      csrf: ensureCsrf(req, res),
+      rows: teamBoard(db),
+    }));
+  });
+
+  app.post('/kudos', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const targetType = req.body.target_type === 'task' ? 'task' : 'comment';
+    const targetId = numericId(req.body.target_id);
+    const back = safeNext(String(req.body.return || '/'));
+    if (!targetId) return res.redirect(back);
+    if (targetType === 'comment') {
+      if (!getComment(db, targetId)) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    } else {
+      const task = getTask(db, targetId);
+      if (!task || task.status !== 'done') return res.redirect(`${back}${back.includes('?') ? '&' : '?'}msg=invalid`);
+    }
+    toggleKudo(db, { userId: req.user.id, targetType, targetId });
+    res.redirect(back);
   });
 
   app.get('/export.csv', requireUser, (req, res) => {
@@ -387,8 +458,15 @@ export function createApp(config) {
     if (parsed.error) return res.redirect('/tasks/new?msg=invalid');
     const projectId = projectFromBody(db, req.body, null);
     if (projectId === false) return res.redirect('/tasks/new?msg=invalid');
+    const quick = req.body.quick === '1';
+    if (quick && !parsed.title) return res.redirect('/?msg=invalid');
     const id = createTask(db, { ...parsed, projectId, createdBy: req.user.id });
+    rememberMentions(db, id, `${parsed.title}\n${parsed.description}`, req.user.id);
     addActivity(db, { taskId: id, actorId: req.user.id, action: 'created', detail: 'Created the task' });
+    if (quick || req.body.from === 'board') {
+      const again = req.body.again === '1';
+      return res.redirect(again ? `/?newtask=1&highlight=${id}` : `/?highlight=${id}`);
+    }
     res.redirect(`/tasks/${id}?msg=created`);
   });
 
@@ -396,8 +474,12 @@ export function createApp(config) {
     const id = numericId(req.params.id);
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    markMentionsRead(db, req.user.id, task.id);
+    req.user.unreadMentions = unreadMentionCount(db, req.user.id);
     const comments = listComments(db, task.id);
     const commentPerms = new Map(comments.map((comment) => [comment.id, canDeleteComment(req.user, comment)]));
+    const commentKudos = kudosSummary(db, req.user.id, 'comment', comments.map((comment) => comment.id));
+    const taskKudos = kudosSummary(db, req.user.id, 'task', [task.id]);
     html(res, 200, renderTask({
       user: req.user,
       csrf: ensureCsrf(req, res),
@@ -408,10 +490,15 @@ export function createApp(config) {
       projects: listProjects(db),
       activity: listActivity(db, task.id),
       attachments: listAttachments(db, task.id),
-      timer: timerView(db, task, req.user.id),
+      timer: { ...timerView(db, task, req.user.id), canControl: canControlTimer(req.user, task) },
       canEdit: canEditTask(req.user, task),
       canDelete: canDeleteTask(req.user),
+      canComplete: canCompleteTask(req.user, task),
       commentPerms,
+      commentKudos,
+      taskKudos,
+      today: todayDate(),
+      toast: toastFrom(req),
     }));
   });
 
@@ -428,6 +515,7 @@ export function createApp(config) {
     if (projectId === false) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     const updated = updateTask(db, task.id, { ...parsed, projectId });
     logTaskChanges(db, req.user, task, updated);
+    rememberMentions(db, task.id, `${parsed.title}\n${parsed.description}`, req.user.id);
     res.redirect(`/tasks/${task.id}?msg=saved`);
   });
 
@@ -436,8 +524,9 @@ export function createApp(config) {
     const id = numericId(req.params.id);
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canControlTimer(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     const result = startTimer(db, { userId: req.user.id, taskId: task.id });
-    if (result.already) return res.redirect(`/tasks/${task.id}?msg=running`);
+    if (result.already) return res.redirect(timerReturn(req, task.id, 'running'));
     if (result.stopped) {
       addActivity(db, { taskId: result.stopped.task_id, actorId: req.user.id, action: 'timer', detail: 'Stopped the timer' });
     }
@@ -454,7 +543,7 @@ export function createApp(config) {
       logTaskChanges(db, req.user, task, updated);
     }
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: 'Started a timer' });
-    res.redirect(`/tasks/${task.id}?msg=started`);
+    res.redirect(timerReturn(req, task.id, 'started'));
   });
 
   app.post('/tasks/:id/timer/stop', requireUser, (req, res) => {
@@ -462,10 +551,60 @@ export function createApp(config) {
     const id = numericId(req.params.id);
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canControlTimer(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     const stopped = stopTimer(db, { userId: req.user.id, taskId: task.id });
-    if (!stopped) return res.redirect(`/tasks/${task.id}?msg=notimer`);
+    if (!stopped) return res.redirect(timerReturn(req, task.id, 'notimer'));
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: 'Stopped the timer' });
-    res.redirect(`/tasks/${task.id}?msg=stopped`);
+    res.redirect(timerReturn(req, task.id, 'stopped'));
+  });
+
+  app.post('/tasks/:id/complete', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canCompleteTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const previous = task.status;
+    if (previous !== 'done') {
+      const updated = updateTask(db, task.id, {
+        title: task.title,
+        description: task.description,
+        assigneeId: task.assignee_id,
+        status: 'done',
+        priority: task.priority,
+        dueDate: task.due_date,
+        projectId: task.project_id,
+      });
+      logTaskChanges(db, req.user, task, updated);
+      stopTimersOnTask(db, task.id);
+      addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Marked the task done' });
+    }
+    const back = safeNext(String(req.body.back || '/'));
+    const join = back.includes('?') ? '&' : '?';
+    res.redirect(`${back}${join}toast=done&undo=${task.id}&was=${encodeURIComponent(previous)}`);
+  });
+
+  app.post('/tasks/:id/reopen', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canCompleteTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const was = ['todo', 'in_progress', 'review'].includes(req.body.status) ? req.body.status : 'in_progress';
+    if (task.status === 'done') {
+      const updated = updateTask(db, task.id, {
+        title: task.title,
+        description: task.description,
+        assigneeId: task.assignee_id,
+        status: was,
+        priority: task.priority,
+        dueDate: task.due_date,
+        projectId: task.project_id,
+      });
+      logTaskChanges(db, req.user, task, updated);
+      addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Reopened the task' });
+    }
+    res.redirect(safeNext(String(req.body.back || `/?highlight=${task.id}`)));
   });
 
   app.post('/tasks/:id/delete', requireUser, (req, res) => {
@@ -489,7 +628,9 @@ export function createApp(config) {
     const body = String(req.body.body || '').trim();
     if (!body || body.length > 8000) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     const commentId = addComment(db, { taskId: task.id, authorId: req.user.id, body });
-    setCommentMentions(db, commentId, mentionedUserIds(body, listActiveUsers(db)));
+    const mentioned = activeUserIds(db, mentionedUserIds(body, listActiveUsers(db)));
+    setCommentMentions(db, commentId, mentioned);
+    notifyMentions(db, { taskId: task.id, userIds: mentioned, actorId: req.user.id });
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'comment', detail: 'Added a comment' });
     res.redirect(`/tasks/${task.id}?msg=commented`);
   });
@@ -671,6 +812,7 @@ function readFilters(req) {
   else if (req.query.assignee === 'none') assigneeId = 'none';
   else if (/^\d+$/.test(String(req.query.assignee || ''))) assigneeId = Number(req.query.assignee);
   const projectId = /^\d+$/.test(String(req.query.project || '')) ? Number(req.query.project) : null;
+  const due = req.query.due === 'today' ? todayDate() : '';
   const mentions = req.query.mentions === '1';
   return {
     status,
@@ -678,6 +820,7 @@ function readFilters(req) {
     assigneeId,
     projectId,
     mentions,
+    due,
     mentionUserId: mentions ? req.user.id : null,
     overdue: req.query.overdue === '1',
     search: String(req.query.q || '').trim().slice(0, 100),
@@ -714,13 +857,47 @@ function manageFilters(req) {
   };
 }
 
+function toastFrom(req) {
+  if (req.query.toast !== 'done') return null;
+  if (!/^\d+$/.test(String(req.query.undo || ''))) return null;
+  const undo = Number(req.query.undo);
+  const was = ['todo', 'in_progress', 'review', 'done'].includes(String(req.query.was)) ? String(req.query.was) : 'in_progress';
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(req.query)) {
+    if (['toast', 'undo', 'was'].includes(key) || typeof value !== 'string') continue;
+    params.set(key, value);
+  }
+  const query = params.toString();
+  return { undo, was, back: `${req.path}${query ? `?${query}` : ''}` };
+}
+
+function rememberMentions(db, taskId, text, actorId) {
+  const ids = activeUserIds(db, mentionedUserIds(text, listActiveUsers(db)));
+  setTaskMentions(db, taskId, ids);
+  notifyMentions(db, { taskId, userIds: ids, actorId });
+}
+
+function timerReturn(req, taskId, msg) {
+  if (req.body.return === 'board') {
+    const back = safeNext(String(req.body.back || '/'));
+    const join = back.includes('?') ? '&' : '?';
+    return `${back}${join}msg=${msg}`;
+  }
+  return `/tasks/${taskId}?msg=${msg}`;
+}
+
 function projectFromBody(db, body, currentId) {
-  const typed = String(body.new_project || '').trim();
+    const typed = String(body.project_name || body.new_project || '').trim();
+  const rawEarly = String(body.project_id || '').trim();
   if (typed) {
+    if (rawEarly && /^\d+$/.test(rawEarly)) {
+      const selected = getProject(db, Number(rawEarly));
+      if (selected && selected.name.toLowerCase() === typed.toLowerCase()) return selected.id;
+    }
     if (typed.length > 80) return false;
     return findOrCreateProject(db, typed);
   }
-  const raw = String(body.project_id || '').trim();
+  const raw = rawEarly;
   if (!raw) return null;
   if (!/^\d+$/.test(raw)) return false;
   const project = getProject(db, Number(raw));

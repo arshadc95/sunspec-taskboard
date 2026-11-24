@@ -19,6 +19,16 @@ export function canDeleteTask(actor) {
   return Boolean(actor) && (actor.role === 'superuser' || actor.role === 'admin');
 }
 
+export function canCompleteTask(actor, task) {
+  if (!actor || !task) return false;
+  if (actor.role === 'superuser' || actor.role === 'admin') return true;
+  return task.created_by === actor.id || task.assignee_id === actor.id;
+}
+
+export function canControlTimer(actor, task) {
+  return Boolean(actor && task && task.assignee_id === actor.id);
+}
+
 export function canDeleteComment(actor, comment) {
   if (!actor || !comment) return false;
   if (actor.role === 'superuser') return true;

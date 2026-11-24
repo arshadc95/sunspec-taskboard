@@ -1,5 +1,5 @@
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { daysBetween, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue } from './time.js';
+import { daysBetween, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
 
 const ICONS = {
   tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -8,6 +8,8 @@ const ICONS = {
   menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   at: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 12v1a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16v-5M12 16V8M16 16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 10h18M8 3v4M16 3v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  team: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6M16 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6M3 20a5 5 0 0 1 10 0M13 20a5 5 0 0 1 8 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
 const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig', 'notimer']);
@@ -27,25 +29,26 @@ function textBlock(value) {
 }
 
 function highlightMentions(body, users) {
-  let text = esc(body);
+  const slots = [];
+  const marked = String(body || '').replace(/@\[([^\]]*)\]\((\d+)\)/g, (all, name, id) => {
+    const user = (users || []).find((item) => String(item.id) === String(id));
+    const label = esc(user?.name || name || 'someone');
+    const index = slots.push(`<span class="mention" data-user="${esc(id)}">@${label}</span>`) - 1;
+    return `\u0000${index}\u0000`;
+  });
+  let text = esc(marked);
   const sorted = [...(users || [])].sort((a, b) => String(b.name || '').length - String(a.name || '').length);
-  const replacements = [];
-  let tokenId = 0;
   for (const user of sorted) {
     const label = esc(user.name);
-    for (const raw of [user.name, user.email]) {
-      const needle = esc(raw || '');
-      if (!needle) continue;
-      const pattern = new RegExp(`@${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
-      if (!pattern.test(text)) continue;
-      pattern.lastIndex = 0;
-      const token = `\u0000${tokenId++}\u0000`;
-      text = text.replace(pattern, token);
-      replacements.push([token, `<span class="mention">@${label}</span>`]);
-    }
+    const needle = esc(user.name || '');
+    if (!needle) continue;
+    const pattern = new RegExp(`@${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+    text = text.replace(pattern, () => {
+      const index = slots.push(`<span class="mention">@${label}</span>`) - 1;
+      return `\u0000${index}\u0000`;
+    });
   }
-  for (const [token, html] of replacements) text = text.split(token).join(html);
-  return text.replace(/\n/g, '<br>');
+  return text.replace(/\u0000(\d+)\u0000/g, (all, index) => slots[Number(index)] || '').replace(/\n/g, '<br>');
 }
 
 function doc(title, bodyClass, body) {
@@ -61,6 +64,8 @@ function doc(title, bodyClass, body) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
+<!-- Holiday theme: delete public/themes/ and this line to remove it. -->
+<script src="/themes/christmas.js" defer></script>
 </head>
 <body class="${bodyClass}">
 ${body}
@@ -98,12 +103,32 @@ function roleBadge(role) {
   return `<span class="badge role-${esc(role)}">${esc(label)}</span>`;
 }
 
-function navLink(href, icon, label, active) {
-  return `<a class="nav-link${active === icon ? ' active' : ''}" href="${href}" title="${esc(label)}" aria-label="${esc(label)}">${ICONS[icon]}<span class="nav-label">${esc(label)}</span></a>`;
+function navLink(href, icon, label, active, badge = 0) {
+  const count = badge > 0 ? `<span class="nav-badge">${badge > 9 ? '9+' : badge}</span>` : '';
+  return `<a class="nav-link${active === icon ? ' active' : ''}" href="${href}" title="${esc(label)}" aria-label="${esc(label)}">${ICONS[icon]}${count}<span class="nav-label">${esc(label)}</span></a>`;
 }
 
-function layout({ title, user, active, crumb, actions = '', body, csrf, msg }) {
+function peopleScript(users) {
+  const data = (users || []).filter((user) => user.active !== 0).map((user) => ({ id: user.id, name: user.name }));
+  return `<script type="application/json" id="people-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
+}
+
+function toastBox(toast, csrf) {
+  if (!toast) return '';
+  return `<div class="toast" data-toast role="status">
+    <span>Marked done.</span>
+    <form method="post" action="/tasks/${toast.undo}/reopen">
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <input type="hidden" name="status" value="${esc(toast.was)}">
+      <input type="hidden" name="back" value="${esc(toast.back || '/')}">
+      <button class="btn" type="submit">Undo</button>
+    </form>
+  </div>`;
+}
+
+function layout({ title, user, active, crumb, actions = '', body, csrf, msg, people = [], toast = null }) {
   const staff = user.role === 'superuser' || user.role === 'admin';
+  const unread = Number(user.unreadMentions || 0);
   return doc(title, 'app', `
 <header class="topbar">
   <button type="button" class="icon-btn hamburger" data-nav-toggle aria-label="Open menu">${ICONS.menu}</button>
@@ -119,7 +144,9 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg }) {
   <aside class="sidebar">
     <nav class="nav">
       ${navLink('/', 'tasks', 'Tasks', active)}
-      ${navLink('/?mentions=1', 'at', 'Mentions', active)}
+      ${navLink('/?mentions=1', 'at', 'Mentions', active, unread)}
+      ${navLink('/calendar', 'calendar', 'Calendar', active)}
+      ${navLink('/team', 'team', 'Team', active)}
       ${staff ? navLink('/manage', 'chart', 'Manage', active) : ''}
       ${staff ? navLink('/users', 'users', 'Users', active) : ''}
     </nav>
@@ -135,6 +162,7 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg }) {
     </div>
     <div class="content">
       ${banner(msg)}
+      ${toastBox(toast, csrf)}
       ${body}
       <p class="tz">Times shown in Africa/Johannesburg.</p>
     </div>
@@ -142,10 +170,13 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg }) {
 </div>
 <nav class="bottom-nav">
   <a class="${active === 'tasks' ? 'active' : ''}" href="/">Tasks</a>
-  <a class="${active === 'at' ? 'active' : ''}" href="/?mentions=1">Mentions</a>
+  <a class="${active === 'at' ? 'active' : ''}" href="/?mentions=1">Mentions${unread ? ` (${unread > 9 ? '9+' : unread})` : ''}</a>
+  <a class="${active === 'calendar' ? 'active' : ''}" href="/calendar">Calendar</a>
+  <a class="${active === 'team' ? 'active' : ''}" href="/team">Team</a>
   ${staff ? `<a class="${active === 'chart' ? 'active' : ''}" href="/manage">Manage</a>` : ''}
   ${staff ? `<a class="${active === 'users' ? 'active' : ''}" href="/users">Users</a>` : ''}
-</nav>`);
+</nav>
+${peopleScript(people)}`);
 }
 
 export function renderLogin({ msg, next, csrf }) {
@@ -182,51 +213,61 @@ function options(pairs, selected, blank) {
   return html.join('');
 }
 
-function taskForm({ task, users, projects, csrf, canEdit }) {
+function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, from }) {
   const value = task || {};
-  const assigneePairs = users.map((user) => [user.id, user.active ? user.name : `${user.name} (inactive)`]);
-  const projectPairs = (projects || []).map((project) => [project.id, project.name]);
+  const projectName = value.project_name || '';
+  const due = value.due_date || '';
+  const day = today || '';
+  const chips = day
+    ? [['today', 'Today', day], ['tomorrow', 'Tomorrow', shiftDate(day, 1)], ['week', 'Next week', shiftDate(day, 7)], ['none', 'None', '']]
+    : [];
+  const off = canEdit ? '' : 'disabled';
   const fields = `
     <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    ${from ? `<input type="hidden" name="from" value="${esc(from)}">` : ''}
     <label class="field"><span>Title</span>
-      <input name="title" required maxlength="200" value="${esc(value.title || '')}" ${canEdit ? '' : 'disabled'}>
+      <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit ? 'autofocus' : ''}>
     </label>
     <label class="field"><span>Description</span>
-      <textarea name="description" rows="5" maxlength="20000" ${canEdit ? '' : 'disabled'}>${esc(value.description || '')}</textarea>
+      <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
+      ${value.description ? `<div class="desc-preview">${highlightMentions(value.description, users)}</div>` : ''}
     </label>
     <div class="form-grid">
       <label class="field"><span>Project</span>
-        <select name="project_id" ${canEdit ? '' : 'disabled'}>
-          ${options(projectPairs, value.project_id ?? '', 'No project')}
-        </select>
-      </label>
-      <label class="field"><span>Or new project</span>
-        <input name="new_project" maxlength="80" placeholder="Tubecon" ${canEdit ? '' : 'disabled'}>
+        <span class="combo">
+          <input name="project_name" value="${esc(projectName)}" placeholder="Search or create project" autocomplete="off" data-project-input ${off}>
+          <input type="hidden" name="project_id" value="${esc(value.project_id || '')}" data-project-id>
+        </span>
       </label>
       <label class="field"><span>Assignee</span>
-        <select name="assignee_id" ${canEdit ? '' : 'disabled'}>
-          ${options(assigneePairs, value.assignee_id ?? '', 'Unassigned')}
-        </select>
+        <span class="combo">
+          <input value="${esc(value.assignee_name || '')}" placeholder="Search people" autocomplete="off" data-user-input ${off}>
+          <input type="hidden" name="assignee_id" value="${esc(value.assignee_id || '')}" data-user-id>
+          ${canEdit && currentUser ? `<button class="btn btn-tiny" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}
+        </span>
       </label>
       <label class="field"><span>Status</span>
-        <select name="status" ${canEdit ? '' : 'disabled'}>
-          ${options(STATUSES, value.status || 'todo')}
-        </select>
+        <select name="status" ${off}>${options(STATUSES, value.status || 'todo')}</select>
       </label>
-      <label class="field"><span>Priority</span>
-        <select name="priority" ${canEdit ? '' : 'disabled'}>
-          ${options(PRIORITIES, value.priority || '', 'None')}
-        </select>
-      </label>
-      <label class="field"><span>Due date</span>
-        <input name="due_date" type="date" value="${esc(value.due_date || '')}" ${canEdit ? '' : 'disabled'}>
-      </label>
+      <div class="field"><span>Priority</span>
+        <input type="hidden" name="priority" value="${esc(value.priority || '')}" data-priority-input>
+        <div class="segments">${[['','None'], ...PRIORITIES].map(([key, label]) => `<button type="button" class="seg pri-${esc(key || 'none')}${String(value.priority || '') === key ? ' on' : ''}" data-priority="${esc(key)}" ${off}>${esc(label)}</button>`).join('')}</div>
+      </div>
+      <div class="field"><span>Due date</span>
+        <div class="chips">${chips.map(([key, label, date]) => `<button type="button" class="chip" data-due="${esc(date)}" ${off}>${label}</button>`).join('')}</div>
+        <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
+      </div>
     </div>
-    ${canEdit ? '<div class="form-actions"><button class="btn btn-primary" type="submit">Save</button></div>' : ''}
+    ${canEdit ? `<div class="form-actions"><button class="btn btn-primary" type="submit">Save</button>${value.id ? '' : '<button class="btn" type="submit" name="again" value="1">Save & add another</button>'}</div>` : ''}
   `;
   if (!canEdit) return `<div class="stack">${fields}</div>`;
-  const action = task?.id ? `/tasks/${task.id}` : '/tasks';
-  return `<form class="stack" method="post" action="${action}">${fields}</form>`;
+  const action = task?.id ? `/tasks/${value.id}` : '/tasks';
+  return `<form class="stack task-form" method="post" action="${action}">${fields}</form>`;
+}
+
+function projectScript(projects) {
+  const data = (projects || []).map((project) => ({ id: project.id, name: project.name }));
+  return `<script type="application/json" id="project-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
 }
 
 function timerMark(task, user) {
@@ -237,55 +278,111 @@ function timerMark(task, user) {
   return `<span class="dot${mine ? ' mine' : ''}" title="Timer running: ${esc(names)}">●</span> `;
 }
 
-function taskCard(task, today, user) {
+function isAssignee(task, user) {
+  return task.assignee_id === user.id;
+}
+
+function rowTimer(task, user, csrf, back) {
+  if (!isAssignee(task, user)) return '';
+  const mine = (task.running || []).find((row) => row.user_id === user.id);
+  const action = mine ? 'stop' : 'start';
+  const label = mine ? 'Stop' : 'Start';
+  return `<form class="row-timer" method="post" action="/tasks/${task.id}/timer/${action}">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <input type="hidden" name="return" value="board">
+    <input type="hidden" name="back" value="${esc(back)}">
+    <button class="btn btn-tiny" type="submit">${label}</button>
+  </form>`;
+}
+
+function completeControl(task, user, csrf, back, prominent = false) {
+  if (task.status === 'done' || !(user.role === 'superuser' || user.role === 'admin' || task.created_by === user.id || task.assignee_id === user.id)) return '';
+  return `<form class="row-complete" method="post" action="/tasks/${task.id}/complete">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <input type="hidden" name="back" value="${esc(back)}">
+    <button class="btn ${prominent ? 'btn-primary' : 'btn-tiny complete'}" type="submit" title="Mark done">${prominent ? '✓ Complete' : '✓'}</button>
+  </form>`;
+}
+
+function timeCell(task, user, csrf, back) {
+  const mine = (task.running || []).find((row) => row.user_id === user.id);
+  const shown = mine
+    ? `<span class="timer-live" data-started="${esc(mine.started_at)}"><strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></span>`
+    : esc(formatDuration(task.time_seconds || 0));
+  return `<td class="time">${timerMark(task, user)}${shown}${rowTimer(task, user, csrf, back)}</td>`;
+}
+
+function taskCard(task, today, user, csrf, back) {
   const overdue = isOverdue(task.due_date, task.status, today);
-  return `<article class="task-card${overdue ? ' overdue' : ''}" data-href="/tasks/${task.id}">
-    <a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>
+  const mine = (task.running || []).find((row) => row.user_id === user.id);
+  const time = mine
+    ? `<span class="timer-live" data-started="${esc(mine.started_at)}"><strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></span>`
+    : esc(formatDuration(task.time_seconds || 0));
+  return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
+    <div class="card-top">${completeControl(task, user, csrf, back)}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
       <span class="due">${esc(formatDue(task.due_date))}</span>
-      <span class="time">${timerMark(task, user)}${esc(formatDuration(task.time_seconds || 0))}</span>
+      <span class="time">${timerMark(task, user)}${time}${rowTimer(task, user, csrf, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
   </article>`;
 }
 
-export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, counts, today, exportQuery }) {
-  const groups = STATUSES.map(([status, label]) => ({
+function taskRow(task, today, user, csrf, back, highlight) {
+  const overdue = isOverdue(task.due_date, task.status, today);
+  const added = String(highlight || '') === String(task.id);
+  return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}" data-href="/tasks/${task.id}">
+    <td class="task-cell">${completeControl(task, user, csrf, back)}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
+    <td>${esc(task.project_name || '—')}</td>
+    <td>${esc(task.assignee_name || '—')}</td>
+    <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
+    <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
+    <td class="due">${esc(formatDue(task.due_date))}</td>
+    ${timeCell(task, user, csrf, back)}
+    <td class="num">${task.comment_count}</td>
+    <td class="when">${esc(formatDateTime(task.updated_at))}</td>
+  </tr>`;
+}
+
+export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, counts, today, exportQuery, day, highlight, openForm, toast }) {
+  const back = `/${exportQuery ? `?${exportQuery}` : ''}`;
+  const openGroups = STATUSES.filter(([status]) => status !== 'done').map(([status, label]) => ({
     status,
     label,
     rows: tasks.filter((task) => task.status === status),
   })).filter((group) => group.rows.length);
-  const cards = tasks.map((task) => taskCard(task, today, user)).join('');
-  const table = groups.length
-    ? `<div class="table-wrap board-table"><table class="grid">
+  const doneRows = tasks.filter((task) => task.status === 'done');
+  const showDone = filters.status === 'done' || doneRows.some((task) => String(task.id) === String(highlight || ''));
+  const cards = tasks.filter((task) => task.status !== 'done' || showDone).map((task) => taskCard(task, today, user, csrf, back)).join('');
+  const table = `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
           <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th>
         </tr></thead>
         <tbody>
-          ${groups.map((group) => `
+          <tr class="quick-add"><td colspan="9">
+            <form class="quick-form" method="post" action="/tasks">
+              <input type="hidden" name="_csrf" value="${esc(csrf)}">
+              <input type="hidden" name="quick" value="1">
+              <input type="hidden" name="status" value="todo">
+              <input name="title" maxlength="200" placeholder="Add a task…" aria-label="Add a task" required>
+              <select name="assignee_id" aria-label="Assignee">${options(users.map((person) => [person.id, person.name]), '', 'Assignee')}</select>
+              <select name="project_id" aria-label="Project">${options((projects || []).map((project) => [project.id, project.name]), '', 'Project')}</select>
+              <input name="due_date" type="date" aria-label="Due date">
+              <button class="btn btn-primary" type="submit">Add</button>
+            </form>
+          </td></tr>
+          ${openGroups.map((group) => `
             <tr class="group"><td colspan="9">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
-            ${group.rows.map((task) => {
-              const overdue = isOverdue(task.due_date, task.status, today);
-              return `<tr class="task-row${overdue ? ' overdue' : ''}" data-href="/tasks/${task.id}">
-                <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
-                <td>${esc(task.project_name || '—')}</td>
-                <td>${esc(task.assignee_name || '—')}</td>
-                <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
-                <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
-                <td class="due">${esc(formatDue(task.due_date))}</td>
-                <td class="time">${timerMark(task, user)}${esc(formatDuration(task.time_seconds || 0))}</td>
-                <td class="num">${task.comment_count}</td>
-                <td class="when">${esc(formatDateTime(task.updated_at))}</td>
-              </tr>`;
-            }).join('')}
+            ${group.rows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}
           `).join('')}
+          ${doneRows.length ? `<tr class="group"><td colspan="9"><button type="button" class="done-toggle" data-done-toggle aria-expanded="${showDone ? 'true' : 'false'}">Done <span class="group-count">${doneRows.length}</span></button></td></tr>` : ''}
         </tbody>
+        ${doneRows.length ? `<tbody class="done-rows"${showDone ? '' : ' hidden'}>${doneRows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}</tbody>` : ''}
       </table></div>
-      <div class="cards">${cards}</div>`
-    : '<div class="panel empty">No tasks match these filters.</div>';
+      <div class="cards">${cards || '<div class="panel empty">No open tasks. Add one above.</div>'}</div>`;
 
   const assigneeOptions = [
     ['', 'All assignees'],
@@ -294,38 +391,64 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   ];
   const selectedAssignee = filters.mine ? '' : (filters.assigneeId === 'none' ? 'none' : (filters.assigneeId || ''));
 
+  const mineDay = day || { open: 0, dueToday: 0, timer: null };
   const body = `
-    <form class="filters panel" method="get" action="/">
-      <label class="field"><span>Status</span>
-        <select name="status">${options(STATUSES, filters.status, 'All statuses')}</select>
-      </label>
-      <label class="field"><span>Assignee</span>
-        <select name="assignee">${options(assigneeOptions, selectedAssignee)}</select>
-      </label>
-      <label class="check"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}> My tasks</label>
-      <label class="field"><span>Project</span>
-        <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
-      </label>
-      <label class="check"><input type="checkbox" name="overdue" value="1"${filters.overdue ? ' checked' : ''}> Overdue only</label>
-      <label class="check"><input type="checkbox" name="mentions" value="1"${filters.mentions ? ' checked' : ''}> Mentions</label>
-      <label class="field search"><span>Search</span>
-        <input type="search" name="q" value="${esc(filters.search || '')}" placeholder="Search tasks…">
-      </label>
-      <button class="btn" type="submit">Apply</button>
-      <a class="btn" href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
-      <a class="btn" href="/">Clear</a>
+    <section class="myday panel">
+      <strong>My day</strong>
+      <a href="/?mine=1">${mineDay.open} open</a>
+      <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
+      ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
+    </section>
+    <div class="board-tools">
+      <a class="btn btn-primary btn-lg" href="/tasks/new" data-open-drawer>+ New task</a>
+      <form class="filters" method="get" action="/" data-live>
+        <button type="button" class="btn filters-toggle" data-filters-toggle>Filters</button>
+        <div class="filters-body">
+          <label class="field"><span>Status</span>
+            <select name="status">${options(STATUSES, filters.status, 'All statuses')}</select>
+          </label>
+          <label class="field"><span>Assignee</span>
+            <select name="assignee">${options(assigneeOptions, selectedAssignee)}</select>
+          </label>
+          <label class="field"><span>Project</span>
+            <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
+          </label>
+          <label class="check"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}> <span>My tasks</span></label>
+          <label class="check"><input type="checkbox" name="overdue" value="1"${filters.overdue ? ' checked' : ''}> <span>Overdue only</span></label>
+          <label class="check"><input type="checkbox" name="mentions" value="1"${filters.mentions ? ' checked' : ''}> <span>Mentions</span></label>
+          <label class="field search"><span>Search</span>
+            <input type="search" name="q" value="${esc(filters.search || '')}" placeholder="Search tasks">
+          </label>
+        </div>
+        <a class="btn" data-csv href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
+        <a class="btn" href="/">Clear</a>
+      </form>
+    </div>
+    <form class="quick-form quick-mobile panel" method="post" action="/tasks">
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <input type="hidden" name="quick" value="1">
+      <input type="hidden" name="status" value="todo">
+      <input name="title" maxlength="200" placeholder="Add a task…" aria-label="Add a task" required>
+      <button class="btn btn-primary" type="submit">Add</button>
     </form>
-    <p class="sort-note">Sorted by due date. Overdue tasks (due before today and not Done) are highlighted.</p>
-    ${table}`;
+    <p class="sort-note">Sorted by due date. Press N for a new task. Overdue tasks are highlighted.</p>
+    ${openGroups.length || doneRows.length ? table : '<div class="panel empty">No tasks match these filters.</div>'}
+    <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
+      <div class="drawer-bar"><h2>New task</h2><button type="button" class="btn" data-close-drawer>Close</button></div>
+      ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board' })}
+    </dialog>
+    <a class="fab" href="/tasks/new" data-open-drawer aria-label="New task">+</a>
+    ${projectScript(projects)}`;
 
   return layout({
     title: 'Tasks · Sunspec',
     user,
     csrf,
     msg,
+    toast,
+    people: users,
     active: filters.mentions ? 'at' : 'tasks',
     crumb: `<span>Tasks</span> <span class="count-pill">${counts.open}</span> <span class="crumb-meta">${counts.overdue} overdue</span>`,
-    actions: '<a class="btn-on-orange" href="/tasks/new">New task</a>',
     body,
   });
 }
@@ -335,7 +458,9 @@ function renderTimer(task, csrf, timer) {
   const mine = timer.mine;
   const summary = timer.summary || { total: 0, perUser: [] };
   const entries = timer.entries || [];
-  const controls = mine
+  const controls = !timer.canControl
+    ? '<p class="hint">Only the assignee can start or stop the timer.</p>'
+    : mine
     ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
       <form method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-danger" type="submit">Stop</button></form>`
     : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
@@ -351,7 +476,17 @@ function renderTimer(task, csrf, timer) {
   </section>`;
 }
 
-export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], timer = null, canEdit, canDelete, commentPerms }) {
+function kudosButton({ csrf, type, id, count = 0, mine = false, back }) {
+  return `<form class="kudos" method="post" action="/kudos">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <input type="hidden" name="target_type" value="${esc(type)}">
+    <input type="hidden" name="target_id" value="${esc(id)}">
+    <input type="hidden" name="return" value="${esc(back)}">
+    <button class="btn btn-tiny${mine ? ' on' : ''}" type="submit">Kudos ${count}</button>
+  </form>`;
+}
+
+export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
@@ -371,6 +506,14 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
           <article class="comment">
             <header><strong>${esc(comment.author_name)}</strong> <time>${esc(formatDateTime(comment.created_at))}</time></header>
             <div class="comment-body">${highlightMentions(comment.body, users)}</div>
+            ${kudosButton({
+              csrf,
+              type: 'comment',
+              id: comment.id,
+              count: commentKudos?.counts.get(comment.id) || 0,
+              mine: commentKudos?.mine.has(comment.id),
+              back: `/tasks/${task.id}`,
+            })}
             ${commentPerms.get(comment.id) ? `<form method="post" action="/comments/${comment.id}/delete">
               <input type="hidden" name="_csrf" value="${esc(csrf)}">
               <button class="btn btn-tiny" type="submit">Delete</button>
@@ -380,7 +523,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         <form class="stack" method="post" action="/tasks/${task.id}/comments">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <label class="field"><span>Add a comment</span>
-            <textarea name="body" rows="3" required maxlength="8000" placeholder="Use @Name to mention someone"></textarea>
+            <textarea name="body" data-mentions rows="3" required maxlength="8000" placeholder="Add a comment. Type @ to mention someone."></textarea>
           </label>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Comment</button></div>
         </form>
@@ -391,13 +534,15 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     user,
     csrf,
     msg,
+    toast,
+    people: users,
     active: 'tasks',
     crumb: `<a href="/">Tasks</a> <span class="sep">›</span> <span class="crumb-current">${esc(title)}</span>`,
     body: `
       <section class="panel pad">
-        <h1>${esc(title)}</h1>
+        <div class="title-row"><h1>${esc(title)}</h1>${!isNew && canComplete ? completeControl(task, user, csrf, `/tasks/${task.id}`, true) : ''}${!isNew && task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>
         ${meta}
-        ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit })}
+        ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit, currentUser: user, today })}
         ${deleteForm}
       </section>
       ${renderTimer(task, csrf, timer)}
@@ -424,7 +569,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         <h2>Activity</h2>
         ${activity.length ? activity.map((item) => `<p class="activity"><strong>${esc(item.actor_name)}</strong> ${esc(item.detail)} <time>${esc(formatDateTime(item.created_at))}</time></p>`).join('') : '<p class="hint">No history yet.</p>'}
       </section>`}
-      ${commentBlock}`,
+      ${commentBlock}
+      ${projectScript(projects)}`,
   });
 }
 
@@ -573,6 +719,137 @@ export function renderManage({ user, csrf, msg, report, time, projects, users, f
     msg,
     active: 'chart',
     crumb: '<a href="/">Tasks</a> <span class="sep">›</span> <span>Manage</span>',
+    body,
+  });
+}
+
+function monthCells(year, month) {
+  const count = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const first = `${year}-${String(month).padStart(2, '0')}-01`;
+  const [y, m, d] = first.split('-').map(Number);
+  const pad = (new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay() + 6) % 7;
+  const cells = Array.from({ length: pad }, () => null);
+  for (let day = 1; day <= count; day += 1) {
+    cells.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+  while (cells.length % 7) cells.push(null);
+  return cells;
+}
+
+function weekCells(anchor) {
+  const [year, month, day] = anchor.split('-').map(Number);
+  const pad = (new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay() + 6) % 7;
+  const monday = shiftDate(anchor, -pad);
+  return Array.from({ length: 7 }, (unused, index) => shiftDate(monday, index));
+}
+
+function chip(task, today) {
+  const overdue = isOverdue(task.due_date, task.status, today);
+  const done = task.status === 'done';
+  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${done ? ' done' : ''}" href="/tasks/${task.id}">${esc(task.title)}</a>`;
+}
+
+export function renderCalendar({ user, csrf, msg, tasks, filters, users, projects, today, view, year, month, anchor }) {
+  const dated = tasks.filter((task) => task.due_date);
+  const undated = tasks.filter((task) => !task.due_date);
+  const byDay = new Map();
+  for (const task of dated) {
+    if (!byDay.has(task.due_date)) byDay.set(task.due_date, []);
+    byDay.get(task.due_date).push(task);
+  }
+  const cells = view === 'week' ? weekCells(anchor) : monthCells(year, month);
+  const label = view === 'week'
+    ? `${formatDue(cells[0])} – ${formatDue(cells[6])}`
+    : new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1, 12)));
+  const prevMonth = month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
+  const nextMonth = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, '0')}`;
+  const prevWeek = shiftDate(anchor, -7);
+  const nextWeek = shiftDate(anchor, 7);
+  const keep = new URLSearchParams();
+  if (filters.status) keep.set('status', filters.status);
+  if (filters.mine) keep.set('mine', '1');
+  else if (filters.assigneeId === 'none') keep.set('assignee', 'none');
+  else if (filters.assigneeId) keep.set('assignee', String(filters.assigneeId));
+  if (filters.projectId) keep.set('project', String(filters.projectId));
+  const withKeep = (extra) => {
+    const params = new URLSearchParams(keep);
+    for (const [key, value] of Object.entries(extra)) params.set(key, value);
+    return `/calendar?${params}`;
+  };
+  const grid = `<div class="cal-grid">
+    ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((name) => `<div class="cal-head">${name}</div>`).join('')}
+    ${cells.map((day) => `<div class="cal-day${day === today ? ' today' : ''}${day ? '' : ' pad'}">${day ? `<span>${Number(day.slice(8))}</span>${(byDay.get(day) || []).map((task) => chip(task, today)).join('')}` : ''}</div>`).join('')}
+  </div>`;
+  const agendaDays = [...byDay.keys()].sort();
+  const agenda = `<div class="cal-agenda">${agendaDays.map((day) => `<section><h2>${esc(formatDue(day))}</h2><ul class="plain">${byDay.get(day).map((task) => `<li>${chip(task, today)}</li>`).join('')}</ul></section>`).join('') || '<p class="hint">Nothing due in this range.</p>'}</div>`;
+  const assigneeOptions = [['', 'All assignees'], ['none', 'Unassigned'], ...users.map((person) => [String(person.id), person.name])];
+  const selectedAssignee = filters.mine ? '' : (filters.assigneeId === 'none' ? 'none' : (filters.assigneeId || ''));
+  const body = `
+    <div class="cal-nav">
+      <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: prevWeek }) : withKeep({ month: prevMonth })}">Prev</a>
+      <strong>${esc(label)}</strong>
+      <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: nextWeek }) : withKeep({ month: nextMonth })}">Next</a>
+      <a class="btn" href="${withKeep(view === 'week' ? { view: 'week', day: today } : { month: today.slice(0, 7) })}">Today</a>
+      <a class="btn${view === 'month' ? ' btn-primary' : ''}" href="${withKeep({ month: `${year}-${String(month).padStart(2, '0')}` })}">Month</a>
+      <a class="btn${view === 'week' ? ' btn-primary' : ''}" href="${withKeep({ view: 'week', day: anchor })}">Week</a>
+    </div>
+    <form class="filters" method="get" action="/calendar" data-live>
+      <button type="button" class="btn filters-toggle" data-filters-toggle>Filters</button>
+      <div class="filters-body">
+        <label class="field"><span>Status</span><select name="status">${options(STATUSES, filters.status, 'All statuses')}</select></label>
+        <label class="field"><span>Assignee</span><select name="assignee">${options(assigneeOptions, selectedAssignee)}</select></label>
+        <label class="field"><span>Project</span><select name="project">${options(projects.map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select></label>
+        <label class="check"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}> <span>My tasks</span></label>
+        <input type="hidden" name="view" value="${esc(view)}">
+        ${view === 'week' ? `<input type="hidden" name="day" value="${esc(anchor)}">` : `<input type="hidden" name="month" value="${year}-${String(month).padStart(2, '0')}">`}
+      </div>
+      <a class="btn" href="/calendar">Clear</a>
+    </form>
+    ${grid}
+    ${agenda}
+    <section class="panel pad"><h2>No due date</h2>
+      ${undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>'}
+    </section>`;
+  return layout({
+    title: 'Calendar · Sunspec',
+    user,
+    csrf,
+    msg,
+    people: users,
+    active: 'calendar',
+    crumb: '<a href="/">Tasks</a> <span class="sep">›</span> <span>Calendar</span>',
+    body,
+  });
+}
+
+export function renderTeam({ user, csrf, rows }) {
+  const body = `
+    <section class="panel pad">
+      <h1>Team</h1>
+      <p class="hint">Completed work and tracked hours. On time means the completion day in Johannesburg is on or before the due date. A streak is consecutive days with at least one completion, counting back from today.</p>
+    </section>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>Person</th><th>Done this week</th><th>Done this month</th><th>Hours this week</th><th>Hours this month</th><th>On time</th><th>Streak</th></tr></thead>
+        <tbody>
+          ${rows.length ? rows.map((row) => `<tr>
+            <td>${esc(row.name)}</td>
+            <td class="num">${row.weekCount}</td>
+            <td class="num">${row.monthCount}</td>
+            <td class="num">${row.weekHours}</td>
+            <td class="num">${row.monthHours}</td>
+            <td class="num">${row.onTimePercent === null ? '—' : `${row.onTimePercent}%`}</td>
+            <td class="num">${row.streak}</td>
+          </tr>`).join('') : '<tr><td colspan="7">No active people yet.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+  return layout({
+    title: 'Team · Sunspec',
+    user,
+    csrf,
+    active: 'team',
+    crumb: '<a href="/">Tasks</a> <span class="sep">›</span> <span>Team</span>',
     body,
   });
 }
