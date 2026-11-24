@@ -196,13 +196,14 @@ test('task timers', { timeout: 60000 }, async () => {
     );
     const manage = await page(base, admin.cookies, '/manage');
     assert.equal(manage.res.status, 200);
-    assert.match(manage.text, /Time spent/);
-    assert.match(manage.text, /1h 30m/);
+    assert.match(manage.text, /People/);
+    assert.doesNotMatch(manage.text, /Time spent/);
     assert.match(manage.text, /Finished install/);
     assert.match(manage.text, /Lindi Nkosi/);
     assert.match(manage.text, /Tubecon/);
     const filtered = await page(base, admin.cookies, '/manage?project=' + db.prepare("SELECT id FROM projects WHERE name = 'Tubecon'").get().id);
-    assert.match(filtered.text, /1h 30m/);
+    assert.match(filtered.text, /Tubecon/);
+    assert.doesNotMatch(filtered.text, /Time spent/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();

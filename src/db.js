@@ -70,6 +70,14 @@ function migrate(db) {
       user_id INTEGER NOT NULL REFERENCES users(id),
       PRIMARY KEY (task_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS task_status_history (
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      status TEXT NOT NULL,
+      changed_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_status_history_task ON task_status_history(task_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
     CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -219,6 +227,19 @@ function migrate(db) {
   }
   relaxGrokThreads(db);
   backfillTaskAssignees(db);
+  backfillStatusHistory(db);
+}
+
+function recordStatus(db, taskId, status, changedAt) {
+  db.prepare('INSERT INTO task_status_history (task_id, status, changed_at) VALUES (?, ?, ?)').run(taskId, status, changedAt);
+}
+
+function backfillStatusHistory(db) {
+  db.exec(`
+    INSERT INTO task_status_history (task_id, status, changed_at)
+    SELECT t.id, t.status, t.created_at FROM tasks t
+    WHERE NOT EXISTS (SELECT 1 FROM task_status_history h WHERE h.task_id = t.id)
+  `);
 }
 
 function backfillTaskAssignees(db) {
@@ -412,6 +433,7 @@ export function listTasks(db, filters) {
     where.push("t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ?");
     params.push(filters.today);
   }
+  if (filters.nodue) where.push("(t.due_date IS NULL OR t.due_date = '')");
   if (filters.projectId) {
     where.push('t.project_id = ?');
     params.push(filters.projectId);
@@ -516,6 +538,7 @@ export function createTask(db, fields) {
   const id = Number(info.lastInsertRowid);
   const ids = fields.assigneeIds ?? (fields.assigneeId ? [fields.assigneeId] : []);
   setTaskAssignees(db, id, ids);
+  recordStatus(db, id, fields.status, now);
   return id;
 }
 
@@ -587,6 +610,7 @@ export function updateTask(db, id, fields) {
     id,
   );
   if (Array.isArray(fields.assigneeIds)) setTaskAssignees(db, id, fields.assigneeIds);
+  if (fields.status !== current.status) recordStatus(db, id, fields.status, now);
   return getTask(db, id);
 }
 

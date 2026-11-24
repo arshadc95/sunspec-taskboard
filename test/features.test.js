@@ -148,7 +148,15 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.equal(manage.res.status, 200);
     assert.match(manage.text, /Lindi Nkosi/);
     assert.match(manage.text, /Tubecon logger/);
-    assert.match(manage.text, /Open tasks by person/);
+    assert.match(manage.text, /Needs attention/);
+    assert.match(manage.text, /Coach/);
+    assert.doesNotMatch(manageDenied.text, /href="\/manage"/);
+    const again = await page(base, admin.cookies, '/users');
+    await post(base, admin.cookies, '/users', { _csrf: again.csrf, name: 'Thabo Admin', email: 'thabo-admin@example.com', password: 'thabo-password', role: 'admin' });
+    const thaboAdmin = await login(base, 'thabo-admin@example.com', 'thabo-password');
+    assert.equal((await page(base, thaboAdmin.cookies, '/manage')).res.status, 200);
+    assert.equal((await page(base, admin.cookies, '/manage')).res.status, 200);
+    assert.doesNotMatch((await page(base, lindi.cookies, '/')).text, /href="\/manage"/);
 
     const uploadForm = new FormData();
     uploadForm.set('_csrf', form.csrf);

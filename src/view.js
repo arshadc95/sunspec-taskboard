@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
 import { daysBetween, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
 
@@ -717,78 +718,100 @@ function durationRows(items, labelKey) {
   </tbody></table>`;
 }
 
-export function renderManage({ user, csrf, msg, report, time, projects, users, filters, today }) {
-  const rows = [...report.people];
-  if (report.unassigned && ((report.unassigned.open_count || 0) + (report.unassigned.overdue_count || 0) + (report.unassigned.done_week || 0)) > 0) {
-    rows.push({ name: 'Unassigned', ...report.unassigned });
-  }
-  const maxOpen = Math.max(1, ...rows.map((person) => person.open_count || 0));
-  const bars = rows.map((person) => {
-    const width = Math.round(((person.open_count || 0) / maxOpen) * 100);
-    return `<div class="bar-row">
-      <span class="bar-label">${esc(person.name)}</span>
-      <span class="bar" aria-hidden="true"><span style="width:${width}%"></span></span>
-      <span class="bar-n">${person.open_count || 0}</span>
-    </div>`;
-  }).join('');
-  const personPairs = [['none', 'Unassigned'], ...users.map((person) => [String(person.id), person.name])];
-  const doneList = (rows) => rows.length
-    ? `<ul class="plain">${rows.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')} · ${esc(task.project_name || 'No project')} · ${esc(formatDateTime(task.completed_at))}</span></li>`).join('')}</ul>`
-    : '<p class="hint">None.</p>';
+function manageHref(board, extra = {}) {
+  const params = new URLSearchParams();
+  params.set('period', String(extra.period || board.periodDays));
+  if (board.projectId) params.set('project', String(board.projectId));
+  if (extra.sort) params.set('sort', extra.sort);
+  if (extra.dir) params.set('dir', extra.dir);
+  return `/manage?${params}`;
+}
 
+function sortLink(board, key, label) {
+  const next = board.sort === key ? (board.dir === 'asc' ? 'desc' : 'asc') : (key === 'name' ? 'asc' : 'desc');
+  const mark = board.sort === key ? (board.dir === 'asc' ? ' ↑' : ' ↓') : '';
+  return `<a href="${manageHref(board, { sort: key, dir: next })}">${esc(label)}${mark}</a>`;
+}
+
+function delta(now, prev, higherIsBetter) {
+  if (now == null || prev == null) return '';
+  const diff = Math.round((now - prev) * 10) / 10;
+  if (!diff) return '<span class="delta flat">0</span>';
+  const good = higherIsBetter ? diff > 0 : diff < 0;
+  return `<span class="delta ${good ? 'good' : 'bad'}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span>`;
+}
+
+export function renderManage({ user, csrf, msg, board, projects }) {
+  const k = board.kpis;
+  const avgText = k.avg == null ? '—' : `${k.avg}d`;
   const body = `
-    ${sheet('Manage', `<form class="filters" method="get" action="/manage">
-      <label class="field"><span>Project</span>
-        <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
-      </label>
-      <label class="field"><span>Person</span>
-        <select name="person">${options(personPairs, filters.personId || '', 'Everyone')}</select>
-      </label>
-      <button class="btn" type="submit">Apply</button>
-      <a class="btn" href="/manage">Clear</a>
-    </form>`)}
-    <div class="stats">
-      <div class="stat"><span>Open</span><strong>${report.totals.open}</strong></div>
-      <div class="stat"><span>Overdue</span><strong>${report.totals.overdue}</strong></div>
-      <div class="stat"><span>Done this week</span><strong>${report.totals.doneWeek}</strong></div>
-      <div class="stat"><span>Done in 7 days</span><strong>${report.totals.done7}</strong></div>
-      <div class="stat"><span>Done in 30 days</span><strong>${report.totals.done30}</strong></div>
-      <div class="stat"><span>Avg completed</span><strong>${esc(formatDuration(time?.averageSeconds || 0))}</strong></div>
-    </div>
-    <section class="panel pad">
-      <h2>Time spent</h2>
-      <p class="hint">Average is the mean logged time on completed tasks that have a time entry (${time?.completedWithTime || 0} of ${time?.completedCount || 0} completed). A running timer counts up to now.</p>
-      <h2>By person</h2>
-      ${durationRows(time?.byPerson || [], 'name')}
-      <h2>By project</h2>
-      ${durationRows(time?.byProject || [], 'name')}
-      <h2>By task</h2>
-      ${durationRows(time?.byTask || [], 'title')}
+    <section class="sheet">
+      <header class="sheet-title">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span>Manage</span>
+        <form class="manage-switch" method="get" action="/manage" data-live>
+          <select name="project" aria-label="Project">${options((projects || []).map((project) => [String(project.id), project.name]), board.projectId || '', 'All projects')}</select>
+          <input type="hidden" name="period" value="${board.periodDays}">
+          <span class="seg-toggle">
+            ${[7, 30, 90].map((days) => `<a class="${board.periodDays === days ? 'on' : ''}" href="${manageHref(board, { period: days })}">${days}d</a>`).join('')}
+          </span>
+          <a class="bar-clear" href="/manage">Clear</a>
+        </form>
+      </header>
+      <div class="sheet-body">
+        <section class="coach">
+          <h2 class="light-h">Coach</h2>
+          ${board.tips.length ? `<ul class="coach-list">${board.tips.map((item) => `<li class="${item.tone === 'good' ? 'good' : ''}"><a href="${esc(item.href)}">${esc(item.text)}</a></li>`).join('')}</ul>` : '<p class="hint">Nothing to flag on this sample.</p>'}
+          <p class="manager-tip">${esc(board.managerTip)}</p>
+        </section>
+        <div class="kpi-row">
+          <div class="kpi"><div class="kpi-top"><span>Open</span>${sparkline(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, false)} <span class="delta flat">vs prior</span></div>
+          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${sparkline(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, false)} <span class="delta flat">vs prior</span></div>
+          <div class="kpi"><div class="kpi-top"><span>Done</span>${sparkline(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, true)} <span class="delta flat">vs prior</span></div>
+          <div class="kpi"><div class="kpi-top"><span>Avg cycle time</span>${sparkline(k.sparkCycle, '#f97316')}</div><strong>${avgText}</strong>${delta(k.avg, k.avgPrev, false)} <span class="delta flat">vs prior</span></div>
+        </div>
+      </div>
     </section>
-    <section class="panel pad">
-      <h2>Open tasks by person</h2>
-      ${bars || '<p class="hint">No people to show.</p>'}
-    </section>
-    <div class="table-wrap">
-      <table class="grid">
-        <thead><tr><th>Person</th><th>Open</th><th>Overdue</th><th>Done this week</th></tr></thead>
+    <section class="sheet manage-block">
+      <h2>People</h2>
+      <div class="table-wrap"><table class="grid">
+        <thead><tr>
+          <th>${sortLink(board, 'name', 'Name')}</th>
+          <th class="num">${sortLink(board, 'assigned', 'Assigned')}</th>
+          <th class="num">${sortLink(board, 'done', 'Done')}</th>
+          <th class="num">${sortLink(board, 'ontime', 'On time')}</th>
+          <th class="num">${sortLink(board, 'avg', 'Avg cycle')}</th>
+          <th class="num">${sortLink(board, 'overdue', 'Overdue')}</th>
+        </tr></thead>
         <tbody>
-          ${rows.map((person) => `<tr>
-            <td>${esc(person.name)}</td>
-            <td class="num">${person.open_count || 0}</td>
-            <td class="num">${person.overdue_count || 0}</td>
-            <td class="num">${person.done_week || 0}</td>
-          </tr>`).join('') || '<tr><td colspan="4">No rows.</td></tr>'}
+          ${board.people.map((person) => `<tr>
+            <td><a href="/?assignee=${person.id}">${esc(person.name)}</a></td>
+            <td class="num">${person.assigned}</td>
+            <td class="num">${person.done}</td>
+            <td class="num">${ring(person.onTimePct)} ${person.onTimePct == null ? '—' : `${person.onTimePct}%`}</td>
+            <td class="num">${person.avgDays == null ? '—' : `${person.avgDays}d`}</td>
+            <td class="num${person.overdue ? ' late' : ''}">${person.overdue}</td>
+          </tr>`).join('') || '<tr><td colspan="6">No active people.</td></tr>'}
         </tbody>
-      </table>
-    </div>
-    <section class="panel pad">
-      <h2>Overdue</h2>
-      ${report.overdue.length ? `<ul class="plain">${report.overdue.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')} · ${esc(task.project_name || 'No project')} · due ${esc(formatDue(task.due_date))} · ${daysBetween(task.due_date, today)}d</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue.</p>'}
+      </table></div>
     </section>
-    <div class="split">
-      <section class="panel pad"><h2>Completed in 7 days</h2>${doneList(report.done7)}</section>
-      <section class="panel pad"><h2>Completed in 30 days</h2>${doneList(report.done30)}</section>
+    <div class="manage-grid">
+      <section class="sheet manage-block"><h2>Created and done</h2><div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div></section>
+      <section class="sheet manage-block"><h2>Flow by status</h2><div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div></section>
+      <section class="sheet manage-block"><h2>Cycle time</h2><div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}${board.cycle.p85 == null ? '' : `<p class="hint">Orange line is the 85th percentile, ${board.cycle.p85} days.</p>`}</div></section>
+      <section class="sheet manage-block"><h2>Open work</h2><div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open-work trend yet.</p>'}</div></section>
+    </div>
+    <section class="sheet manage-block"><h2>Workload</h2><div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div></section>
+    <div class="manage-grid">
+      <section class="sheet manage-block"><h2>Needs attention</h2>
+        ${board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue, stuck in review, or unassigned.</p>'}
+      </section>
+      <section class="sheet manage-block"><h2>By project</h2>
+        <div class="table-wrap"><table class="grid">
+          <thead><tr><th>Project</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Done</th></tr></thead>
+          <tbody>${board.projects.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.open}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.done}</td></tr>`).join('') || '<tr><td colspan="4">No project work in this period.</td></tr>'}</tbody>
+        </table></div>
+      </section>
     </div>`;
 
   return layout({

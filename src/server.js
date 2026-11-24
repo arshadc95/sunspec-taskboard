@@ -71,7 +71,6 @@ import {
   getRunningTimer,
   markMentionsRead,
   myDay,
-  managementReport,
   notifyMentions,
   setCommentMentions,
   setTaskMentions,
@@ -79,7 +78,6 @@ import {
   stopTimer,
   stopTimersOnTask,
   teamBoard,
-  timeReport,
   timeTotals,
   toggleKudo,
   unreadMentionCount,
@@ -87,7 +85,8 @@ import {
 import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
-import { daysAgoIso, entrySeconds, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
+import { entrySeconds, formatDue, isValidDate, todayDate } from './time.js';
+import { buildManage } from './manage.js';
 import { fileExpiry, grokConnected, grokFileExpiry, isPdf, mountBot, pdfFilename, postGrokWebhook, rateLimitMessage, recentContext, webhookFiles } from './grok.js';
 import {
   renderBoard,
@@ -480,12 +479,8 @@ export function createApp(config) {
       user: req.user,
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
-      report: managementReport(db, filters),
-      time: timeReport(db, filters),
+      board: buildManage(db, filters),
       projects: listProjects(db),
-      users: listActiveUsers(db),
-      filters,
-      today: filters.today,
     }));
   });
 
@@ -1142,6 +1137,7 @@ function readFilters(req) {
     due,
     mentionUserId: mentions ? req.user.id : null,
     overdue: req.query.overdue === '1',
+    nodue: req.query.nodue === '1',
     search: String(req.query.q || '').trim().slice(0, 100),
     today: todayDate(),
   };
@@ -1162,18 +1158,11 @@ function filterQuery(filters) {
 
 function manageFilters(req) {
   const projectId = /^\d+$/.test(String(req.query.project || '')) ? Number(req.query.project) : null;
-  let personId = null;
-  if (req.query.person === 'none') personId = 'none';
-  else if (/^\d+$/.test(String(req.query.person || ''))) personId = Number(req.query.person);
-  const now = new Date();
-  return {
-    projectId,
-    personId,
-    today: todayDate(now),
-    weekStart: startOfWeekIso(now),
-    since7: daysAgoIso(7, now),
-    since30: daysAgoIso(30, now),
-  };
+  const period = Number(req.query.period);
+  const days = [7, 30, 90].includes(period) ? period : 30;
+  const sort = ['name', 'assigned', 'done', 'ontime', 'avg', 'overdue'].includes(req.query.sort) ? req.query.sort : 'name';
+  const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
+  return { projectId, days, sort, dir };
 }
 
 function toastFrom(req) {
