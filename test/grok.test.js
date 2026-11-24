@@ -358,6 +358,8 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     assert.match(home.text, /data-grok-new/);
     assert.match(home.text, /data-grok-full/);
     assert.match(home.text, /data-grok-viewer/);
+    assert.match(home.text, /data-grok-title/);
+    assert.match(home.text, /<textarea name="text"/);
     const first = await fetch(`${base}/api/grok`, {
       method: 'POST',
       headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
@@ -365,6 +367,7 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     });
     const alpha = await first.json();
     assert.equal(alpha.title, 'Alpha chat about the roof quote and the');
+    assert.equal(alpha.threads.find((thread) => thread.id === alpha.thread_id).preview, 'Alpha chat about the roof quote and the extra words');
     const created = await fetch(`${base}/api/grok/threads`, {
       method: 'POST',
       headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },

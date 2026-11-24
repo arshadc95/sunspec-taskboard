@@ -1294,7 +1294,26 @@ export function ensureGrokUser(db) {
 }
 
 export function listGrokThreads(db, userId) {
-  return db.prepare('SELECT * FROM grok_threads WHERE user_id = ? ORDER BY updated_at DESC, id DESC').all(userId);
+  return db.prepare(`
+    SELECT t.id, t.user_id, t.title, t.created_at, t.updated_at,
+      (
+        SELECT CASE
+          WHEN m.body != '' THEN m.body
+          ELSE (SELECT f.filename FROM grok_files f WHERE f.message_id = m.id ORDER BY f.id DESC LIMIT 1)
+        END
+        FROM grok_messages m
+        WHERE m.thread_id = t.id
+          AND (
+            m.body != ''
+            OR EXISTS (SELECT 1 FROM grok_files f WHERE f.message_id = m.id)
+          )
+        ORDER BY m.id DESC
+        LIMIT 1
+      ) AS preview
+    FROM grok_threads t
+    WHERE t.user_id = ?
+    ORDER BY t.updated_at DESC, t.id DESC
+  `).all(userId);
 }
 
 export function createGrokThread(db, userId) {

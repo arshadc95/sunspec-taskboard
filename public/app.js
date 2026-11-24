@@ -1,4 +1,4 @@
-import { acceptGrokFiles, applyGrokClick, grokFileView, grokQueuedLabel, grokShouldQueue } from './grok-panel.js';
+import { acceptGrokFiles, applyGrokClick, grokFileView, grokQueuedLabel, grokShouldQueue, grokThreadVisible } from './grok-panel.js';
 import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
 document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
@@ -515,6 +515,9 @@ if (grokRoot) {
   const sidebar = grokRoot.querySelector('[data-grok-list]');
   const list = grokRoot.querySelector('[data-grok-threads]');
   const searchChats = grokRoot.querySelector('[data-grok-search]');
+  const titleInput = grokRoot.querySelector('[data-grok-title]');
+  const queueHost = grokRoot.querySelector('[data-grok-queue]');
+  const backdrop = grokRoot.querySelector('[data-grok-backdrop]');
   const form = grokRoot.querySelector('[data-grok-form]');
   const picked = grokRoot.querySelector('[data-grok-picked]');
   const fileInput = form.querySelector('input[type="file"]');
@@ -599,6 +602,40 @@ if (grokRoot) {
     seeThread(threadId);
   }
 
+  function mark() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M15 4 L8 20');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2.6');
+    path.setAttribute('stroke-linecap', 'square');
+    svg.append(path);
+    return svg;
+  }
+
+  function turn(role, nodes) {
+    const row = document.createElement('div');
+    row.className = `grok-row ${role === 'user' ? 'is-user' : 'is-grok'}`;
+    const avatar = document.createElement('span');
+    avatar.className = 'grok-avatar';
+    avatar.append(mark());
+    const stack = document.createElement('div');
+    stack.className = 'grok-stack';
+    nodes.forEach((node) => stack.append(node));
+    row.append(avatar, stack);
+    return row;
+  }
+
+  function messageBubble(role, text) {
+    const line = document.createElement('p');
+    line.className = role === 'user' ? 'grok-mine' : 'grok-theirs';
+    line.textContent = text;
+    return line;
+  }
+
   function ackNode(live) {
     const box = document.createElement('div');
     box.className = 'grok-ack';
@@ -678,25 +715,32 @@ if (grokRoot) {
       note.textContent = "Grok isn't connected yet";
       log.append(note);
     }
+    const visible = (state.messages || []).filter((message) => message.body || (message.files || []).length || (message.status === 'pending' && !message.body));
+    if (!visible.length && state.connected !== false) {
+      const empty = document.createElement('p');
+      empty.className = 'grok-empty';
+      empty.textContent = 'Ask Grok about the board.';
+      log.append(empty);
+    }
     (state.messages || []).forEach((message) => {
+      const role = message.role === 'user' ? 'user' : 'grok';
       if (message.status === 'pending' && !message.body) {
-        log.append(ackNode(message.live));
-        (message.files || []).forEach((file) => log.append(fileNode(file)));
+        const nodes = [ackNode(message.live)];
+        (message.files || []).forEach((file) => nodes.push(fileNode(file)));
+        log.append(turn('grok', nodes));
         return;
       }
       if (message.body || (message.files || []).length) {
-        if (message.body) {
-          const line = document.createElement('p');
-          line.className = message.role === 'user' ? 'grok-mine' : 'grok-theirs';
-          line.textContent = message.body;
-          log.append(line);
-        }
-        (message.files || []).forEach((file) => log.append(fileNode(file)));
+        const nodes = [];
+        if (message.body) nodes.push(messageBubble(role, message.body));
+        (message.files || []).forEach((file) => nodes.push(fileNode(file)));
+        log.append(turn(role, nodes));
       }
     });
-    (state.files || []).forEach((file) => log.append(fileNode(file)));
+    (state.files || []).forEach((file) => log.append(turn(file.kind === 'in' ? 'user' : 'grok', [fileNode(file)])));
     log.scrollTop = log.scrollHeight;
     threads = state.threads || [];
+    if (titleInput && document.activeElement !== titleInput) titleInput.value = state.title || '';
     renderThreads();
     noteArrivals(state.waiting || []);
     waitingCount = (state.waiting || []).length;
@@ -706,29 +750,52 @@ if (grokRoot) {
 
   function renderThreads() {
     if (!list) return;
-    const query = (searchChats?.value || '').trim().toLowerCase();
+    const query = searchChats?.value || '';
+    const appMode = grokRoot.classList.contains('is-full');
     list.innerHTML = '';
-    const shown = threads.filter((thread) => !query || String(thread.title || 'New chat').toLowerCase().includes(query));
+    const shown = threads.filter((thread) => grokThreadVisible(thread, query));
     shown.forEach((thread) => {
       const row = document.createElement('div');
-      row.className = `grok-chat${thread.id === threadId ? ' is-current' : ''}`;
-      const title = document.createElement('input');
-      title.value = thread.title || '';
-      title.placeholder = 'New chat';
-      title.setAttribute('aria-label', 'Chat title');
-      title.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') { event.preventDefault(); title.blur(); }
-      });
-      title.addEventListener('change', () => renameThread(thread.id, title.value));
-      const openChat = document.createElement('button');
-      openChat.type = 'button';
-      openChat.textContent = 'Open';
-      openChat.addEventListener('click', () => { switchThread(thread.id); if (!full) toggleList(false); });
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = 'Delete';
-      remove.addEventListener('click', () => deleteThread(thread.id));
-      row.append(title, openChat, remove);
+      row.className = `grok-chat${Number(thread.id) === Number(threadId) ? ' is-current' : ''}`;
+      if (appMode) {
+        const openChat = document.createElement('button');
+        openChat.type = 'button';
+        openChat.className = 'grok-chat-main';
+        const title = document.createElement('strong');
+        title.textContent = thread.title || 'New chat';
+        const preview = document.createElement('span');
+        preview.textContent = thread.preview || 'No messages yet';
+        openChat.append(title, preview);
+        openChat.addEventListener('click', () => {
+          switchThread(thread.id);
+          if (drawerMode()) toggleList(false);
+        });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'grok-chat-x';
+        remove.setAttribute('aria-label', 'Delete chat');
+        remove.textContent = '×';
+        remove.addEventListener('click', () => deleteThread(thread.id));
+        row.append(openChat, remove);
+      } else {
+        const title = document.createElement('input');
+        title.value = thread.title || '';
+        title.placeholder = 'New chat';
+        title.setAttribute('aria-label', 'Chat title');
+        title.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') { event.preventDefault(); title.blur(); }
+        });
+        title.addEventListener('change', () => renameThread(thread.id, title.value));
+        const openChat = document.createElement('button');
+        openChat.type = 'button';
+        openChat.textContent = 'Open';
+        openChat.addEventListener('click', () => { switchThread(thread.id); toggleList(false); });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'Delete';
+        remove.addEventListener('click', () => deleteThread(thread.id));
+        row.append(title, openChat, remove);
+      }
       list.append(row);
     });
     if (!shown.length) {
@@ -757,15 +824,15 @@ if (grokRoot) {
     showFileError(result.error);
   }
   function renderQueued() {
-    log.querySelectorAll('[data-queued]').forEach((node) => node.remove());
+    if (!queueHost) return;
+    queueHost.innerHTML = '';
     queue.forEach((item) => {
-      const line = document.createElement('p');
-      line.className = 'grok-mine grok-queued';
-      line.dataset.queued = '1';
-      line.textContent = grokQueuedLabel(item);
-      log.append(line);
+      const chip = document.createElement('span');
+      chip.className = 'grok-queue-chip';
+      chip.dataset.queued = '1';
+      chip.textContent = grokQueuedLabel(item);
+      queueHost.append(chip);
     });
-    if (queue.length) log.scrollTop = log.scrollHeight;
   }
   function showPicked() {
     picked.innerHTML = '';
@@ -797,38 +864,58 @@ if (grokRoot) {
     timer = window.setInterval(() => { load().catch(() => {}); }, 3000);
   }
 
+  function drawerMode() {
+    return full && open && window.matchMedia('(max-width: 800px)').matches;
+  }
+
+  function syncDrawer() {
+    backdrop?.classList.toggle('is-on', drawerMode() && listOpen);
+  }
+
+  let sawDrawer = false;
   function syncLayout(collapseList) {
     grokRoot.classList.toggle('is-full', full && open);
     const button = grokRoot.querySelector('[data-grok-full]');
     if (button) {
       button.setAttribute('aria-pressed', full ? 'true' : 'false');
-      button.textContent = full ? 'Panel' : 'Full';
+      button.textContent = full ? 'Exit' : 'Full';
+      button.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
     }
+    const drawer = drawerMode();
+    if (collapseList || (drawer && !sawDrawer)) listOpen = false;
+    if (!drawer && sawDrawer && full && open) listOpen = true;
+    sawDrawer = drawer;
     if (full && open && sidebar) {
-      listOpen = true;
       sidebar.hidden = false;
-      sidebar.classList.add('is-open');
+      if (drawer) sidebar.classList.toggle('is-open', listOpen);
+      else {
+        listOpen = true;
+        sidebar.classList.add('is-open');
+      }
     } else if (collapseList && sidebar) {
-      listOpen = false;
       sidebar.classList.remove('is-open');
       sidebar.hidden = true;
     }
+    syncDrawer();
+    renderThreads();
   }
 
   function toggleList(force) {
-    if (full && open) {
+    if (full && open && !drawerMode()) {
       listOpen = true;
       if (sidebar) {
         sidebar.hidden = false;
         sidebar.classList.add('is-open');
       }
+      syncDrawer();
       return;
     }
     listOpen = typeof force === 'boolean' ? force : !listOpen;
     if (!sidebar) return;
     sidebar.hidden = false;
     sidebar.classList.toggle('is-open', listOpen);
-    if (!listOpen) sidebar.hidden = true;
+    if (!listOpen && !(full && open)) sidebar.hidden = true;
+    syncDrawer();
   }
 
   async function switchThread(id) {
@@ -894,7 +981,7 @@ if (grokRoot) {
     });
     if (!response.ok) return;
     paint(await response.json());
-    if (!full) toggleList(false);
+    toggleList(false);
     watch();
   }
   grokRoot.querySelector('[data-grok-new]').addEventListener('click', createChat);
@@ -906,6 +993,14 @@ if (grokRoot) {
     else syncLayout(!full);
   });
   searchChats?.addEventListener('input', () => renderThreads());
+  titleInput?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); titleInput.blur(); }
+  });
+  titleInput?.addEventListener('change', () => {
+    if (threadId) renameThread(threadId, titleInput.value);
+  });
+  backdrop?.addEventListener('click', () => toggleList(false));
+  window.addEventListener('resize', () => { if (full && open) syncLayout(); });
   grokRoot.querySelector('[data-grok-viewer-close]')?.addEventListener('click', closeViewer);
   grokRoot.querySelector('[data-grok-attach]').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
@@ -954,18 +1049,13 @@ if (grokRoot) {
   });
   async function sendItem(item) {
     sending = true;
-    if (item.text) {
-      const mine = document.createElement('p');
-      mine.className = 'grok-mine';
-      mine.textContent = item.text;
-      log.append(mine);
-    }
+    if (item.text) log.append(turn('user', [messageBubble('user', item.text)]));
     const wait = connected ? ackNode('') : document.createElement('p');
     if (!connected) {
       wait.className = 'grok-note';
       wait.textContent = "Grok isn't connected yet";
     }
-    log.append(wait);
+    log.append(connected ? turn('grok', [wait]) : wait);
     log.scrollTop = log.scrollHeight;
     const body = new FormData();
     body.set('_csrf', csrf);
@@ -995,9 +1085,16 @@ if (grokRoot) {
     renderQueued();
     sendItem(item);
   }
+  const composer = form.querySelector('[name="text"]');
+  composer.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const input = form.querySelector('input[name="text"]');
+    const input = form.querySelector('[name="text"]');
     const text = input.value.trim();
     if (!text && !chosen.length) return;
     const item = { text, files: chosen };

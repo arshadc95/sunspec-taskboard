@@ -155,7 +155,8 @@ function grokWidget(user, csrf) {
     <section class="grok-panel" hidden>
       <header class="grok-head">
         <button type="button" data-grok-chats>Chats</button>
-        <strong>Grok</strong>
+        <strong data-grok-brand>Grok</strong>
+        <input class="grok-title" data-grok-title maxlength="80" placeholder="New chat" aria-label="Chat title" autocomplete="off">
         <button type="button" data-grok-sound aria-pressed="true">Sound</button>
         <button type="button" data-grok-new>+ New chat</button>
         <button type="button" data-grok-full aria-pressed="false" aria-label="Full screen">Full</button>
@@ -163,6 +164,10 @@ function grokWidget(user, csrf) {
       </header>
       <div class="grok-body">
         <div class="grok-chats" data-grok-list hidden>
+          <div class="grok-side-brand">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4 L8 20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="square"/></svg>
+            <strong>Grok</strong>
+          </div>
           <div class="grok-chat-tools">
             <input class="grok-chat-search" data-grok-search placeholder="Search chats" aria-label="Search chats">
             <button type="button" data-grok-new-side>+ New chat</button>
@@ -172,21 +177,23 @@ function grokWidget(user, csrf) {
         <div class="grok-stage">
           <div class="grok-log" data-grok-log></div>
           <form class="grok-form" data-grok-form>
+            <div class="grok-queue" data-grok-queue></div>
             <div class="grok-picked" data-grok-picked></div>
             <p class="grok-file-error" data-grok-file-error></p>
             <p class="grok-pdf-note" data-grok-pdf-note hidden>Grok can read attached PDFs (max 5 × 15 MB, deleted after 24 h).</p>
             <div class="grok-compose">
-              <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
               <button type="button" class="grok-attach" data-grok-attach aria-label="Attach PDF">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                 <span class="plus">+</span>
               </button>
+              <textarea name="text" maxlength="4000" rows="1" placeholder="Message Grok"></textarea>
               <input type="file" accept="application/pdf,.pdf" multiple hidden>
               <button type="submit">Send</button>
             </div>
           </form>
         </div>
       </div>
+      <div class="grok-backdrop" data-grok-backdrop></div>
       <div class="grok-drop" data-grok-drop>Drop PDF for Grok</div>
       <div class="grok-viewer" data-grok-viewer hidden>
         <header>

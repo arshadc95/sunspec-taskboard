@@ -58,6 +58,18 @@ export function toggleGrokLayout(mode) {
   return mode === 'full' ? 'panel' : 'full';
 }
 
+export function grokPreview(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+}
+
+export function grokThreadVisible(thread, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  const title = String(thread?.title || 'New chat').toLowerCase();
+  const preview = String(thread?.preview || '').toLowerCase();
+  return title.includes(q) || preview.includes(q);
+}
+
 export function grokQueuedLabel(item) {
   const names = (item?.files || []).map((file) => file.name).filter(Boolean).join(', ');
   const body = [String(item?.text || '').trim(), names].filter(Boolean).join(' · ');

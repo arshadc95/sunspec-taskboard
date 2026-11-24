@@ -1,6 +1,6 @@
 # Grok assistant
 
-Grok is a chat bubble on every signed-in page, and an `@Grok` mention in a task comment. The board does not call a model itself. It posts a webhook and waits for the bot API to write the reply.
+Grok is a chat bubble on every signed-in page, and an `@Grok` mention in a task comment. Full in the header opens the same chat as its own page: a chat list with the last line of each thread, the conversation centred, and the composer pinned at the bottom. On a phone that list is a drawer. Exit returns to the bubble. The board does not call a model itself. It posts a webhook and waits for the bot API to write the reply.
 
 No tokens belong in the repository. Set them in the server `.env` only.
 

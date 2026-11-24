@@ -1021,7 +1021,12 @@ export function createApp(config) {
       title: thread?.title || '',
       pending: messages.some((row) => row.status === 'pending'),
       waiting: waiting.map((row) => ({ id: row.id, thread_id: row.thread_id, created_at: row.created_at, live: row.live })),
-      threads: threads.map((item) => ({ id: item.id, title: item.title, updated_at: item.updated_at })),
+      threads: threads.map((item) => ({
+        id: item.id,
+        title: item.title,
+        updated_at: item.updated_at,
+        preview: String(item.preview || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      })),
       messages: messages.map((row) => ({
         id: row.id,
         role: row.role,

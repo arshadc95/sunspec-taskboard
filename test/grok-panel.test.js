@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acceptGrokFiles, applyGrokClick, grokFileView, grokQueuedLabel, grokShouldQueue, toggleGrokLayout, GROK_PDF_MAX_BYTES } from '../public/grok-panel.js';
+import { acceptGrokFiles, applyGrokClick, grokFileView, grokPreview, grokQueuedLabel, grokShouldQueue, grokThreadVisible, toggleGrokLayout, GROK_PDF_MAX_BYTES } from '../public/grok-panel.js';
 
 test('the grok bubble opens once and stays open through that same click', () => {
   let open = false;
@@ -51,6 +51,9 @@ test('a file card keeps a name, size, and open link when the filename is blank',
   assert.equal(named.expiry, 'expired');
   assert.equal(toggleGrokLayout('panel'), 'full');
   assert.equal(toggleGrokLayout('full'), 'panel');
+  assert.equal(grokPreview('  Roof   quote \n today  '), 'Roof quote today');
+  assert.equal(grokThreadVisible({ title: 'Roof quote', preview: 'See the drawing' }, 'drawing'), true);
+  assert.equal(grokThreadVisible({ title: 'Roof quote', preview: 'See the drawing' }, 'panel'), false);
 });
 
 test('the grok bubble, the close button, and a real outside click close the panel', () => {
