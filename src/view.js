@@ -695,7 +695,9 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
 
 function manageHref(board, extra = {}) {
   const params = new URLSearchParams();
-  params.set('period', String(extra.period || board.periodDays));
+  const range = extra.range !== undefined ? extra.range : board.range;
+  if (range) params.set('range', range);
+  else params.set('period', String(extra.period || board.periodDays || 30));
   if (board.projectId) params.set('project', String(board.projectId));
   if (extra.sort) params.set('sort', extra.sort);
   if (extra.dir) params.set('dir', extra.dir);
@@ -708,7 +710,7 @@ function sortLink(board, key, label) {
   return `<a href="${manageHref(board, { sort: key, dir: next })}">${esc(label)}${mark}</a>`;
 }
 
-function delta(now, prev, tone, days) {
+function delta(now, prev, tone, label) {
   if (now == null || prev == null) return '';
   if (!prev) return now ? '<span class="delta flat">new</span>' : '';
   const diff = Math.round((now - prev) * 10) / 10;
@@ -716,7 +718,7 @@ function delta(now, prev, tone, days) {
   let klass = 'flat';
   if (tone === 'upGood') klass = diff > 0 ? 'good' : 'bad';
   if (tone === 'upBad') klass = diff > 0 ? 'bad' : 'good';
-  return `<span class="delta ${klass}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span> <span class="delta flat">vs last ${days} days</span>`;
+  return `<span class="delta ${klass}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span> <span class="delta flat">${esc(label)}</span>`;
 }
 
 function manageCard(title, sub, inner) {
@@ -730,7 +732,7 @@ function kpiSpark(series, color, zeroCounts = false) {
   return sparkline(present.map((value) => value || 0), color);
 }
 
-function flowSubtitle(cfd) {
+function flowSubtitle(cfd, bucket) {
   const names = [
     ['todo', 'To do'],
     ['in_progress', 'In progress'],
@@ -739,7 +741,7 @@ function flowSubtitle(cfd) {
   ].filter(([key]) => (cfd?.[key] || []).some((value) => value > 0)).map(([, label]) => label);
   if (names.length < 2) return 'A wide band means tasks are sitting in that status.';
   const list = names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
-  return `How many tasks are in ${list} each day. A wide band means tasks are sitting there.`;
+  return `How many tasks are in ${list} each ${bucket === 'week' ? 'week' : 'day'}. A wide band means tasks are sitting there.`;
 }
 
 export function renderManage({ user, csrf, msg, board, projects }) {
@@ -754,8 +756,14 @@ export function renderManage({ user, csrf, msg, board, projects }) {
           <select name="project" aria-label="Project">${options((projects || []).map((project) => [String(project.id), project.name]), board.projectId || '', 'All projects')}</select>
           <input type="hidden" name="period" value="${board.periodDays}">
           <span class="seg-toggle">
-            ${[7, 30, 90].map((days) => `<a class="${board.periodDays === days ? 'on' : ''}" href="${manageHref(board, { period: days })}">${days}d</a>`).join('')}
+            ${[7, 30, 90].map((days) => `<a class="${!board.range && board.periodDays === days ? 'on' : ''}" href="${manageHref(board, { period: days, range: '' })}">${days}d</a>`).join('')}
           </span>
+          <select name="range" aria-label="Month">
+            <option value="">Month</option>
+            <option value="this"${board.range === 'this' ? ' selected' : ''}>This month</option>
+            ${(board.months || []).map((month) => `<option value="${esc(month.value)}"${board.range === month.value ? ' selected' : ''}>${esc(month.label)}</option>`).join('')}
+            <option value="year"${board.range === 'year' ? ' selected' : ''}>This year</option>
+          </select>
           <a class="bar-clear" href="/manage">Clear</a>
         </form>
       </header>
@@ -767,10 +775,10 @@ export function renderManage({ user, csrf, msg, board, projects }) {
           <p class="manager-tip">${esc(board.managerTip)}</p>
         </section>
         <div class="kpi-row">
-          <div class="kpi"><div class="kpi-top"><span>Open</span>${kpiSpark(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral', board.periodDays)}</div>
-          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${kpiSpark(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad', board.periodDays)}</div>
-          <div class="kpi"><div class="kpi-top"><span>Done</span>${kpiSpark(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood', board.periodDays)}</div>
-          <div class="kpi"><div class="kpi-top"><span>Avg days to finish</span>${k.avg == null ? '' : kpiSpark(k.sparkCycle, '#f97316', true)}</div>${k.avg == null ? '<p class="kpi-empty">Not enough data yet</p>' : `<strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad', board.periodDays)}`}</div>
+          <div class="kpi"><div class="kpi-top"><span>Open</span>${kpiSpark(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral', board.compare)}</div>
+          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${kpiSpark(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad', board.compare)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Done</span>${kpiSpark(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood', board.compare)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Avg days to finish</span>${k.avg == null ? '' : kpiSpark(k.sparkCycle, '#f97316', true)}</div>${k.avg == null ? '<p class="kpi-empty">Not enough data yet</p>' : `<strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad', board.compare)}`}</div>
         </div>
       </div>
     </section>
@@ -800,11 +808,15 @@ export function renderManage({ user, csrf, msg, board, projects }) {
     </section>
     <div class="manage-grid">
       ${manageCard('Created vs done', 'If created stays above done, work is piling up.', `<div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div>`)}
-      ${manageCard('Status over time', flowSubtitle(board.cfd), `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
+      ${manageCard('Status over time', flowSubtitle(board.cfd, board.bucket), `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
       ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
       ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>
-    ${manageCard('Workload', 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
+    ${manageCard('Workload', board.bucket === 'week' ? 'Orange marks a week that person finished a task.' : 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
+    ${manageCard('Month by month', 'Created, finished, and still late at the end of each month.', `<div class="table-wrap"><table class="grid">
+      <thead><tr><th>Month</th><th class="num">Created</th><th class="num">Done</th><th class="num">Overdue</th><th class="num">Avg days to finish</th></tr></thead>
+      <tbody>${(board.monthRows || []).map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.created}</td><td class="num">${row.done}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.avg == null ? '—' : row.avg}</td></tr>`).join('')}</tbody>
+    </table></div>`)}
     <div class="manage-grid">
       ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
       ${manageCard('By project', 'Open, overdue, and finished tasks in this period.', `<div class="table-wrap"><table class="grid">
