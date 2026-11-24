@@ -717,10 +717,14 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
     const roleEditor = superuser && !self
       ? `<select form="user-${person.id}" name="role">${options(ROLES, person.role)}</select>`
       : '';
+    const shown = colorForUser(person.id, person.color);
     return `<tr class="${person.active ? '' : 'inactive'}">
       <td>
-        <span class="name-line">${swatch(person.color, person.id)}<input form="user-${person.id}" name="name" required maxlength="120" value="${esc(person.name)}"></span>
-        <div class="color-pick">${PALETTE.map((color) => `<label title="Colour"><input form="user-${person.id}" type="radio" name="color" value="${color}"${person.color === color ? ' checked' : ''}><i class="swatch" style="background:${color}"></i></label>`).join('')}</div>
+        <div class="user-name">
+          <span class="swatch" style="background:${shown}" title="Colour"></span>
+          <span class="color-pick">${PALETTE.map((color) => `<label title="Colour"><input form="user-${person.id}" type="radio" name="color" value="${color}"${shown === color ? ' checked' : ''}><i class="swatch" style="background:${color}"></i></label>`).join('')}</span>
+          <input class="user-name-input" form="user-${person.id}" name="name" required maxlength="120" value="${esc(person.name)}">
+        </div>
       </td>
       <td><input form="user-${person.id}" name="email" type="email" required value="${esc(person.email)}"></td>
       <td><div class="role-cell">${roleBadge(person.role)}${roleEditor}</div></td>

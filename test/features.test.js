@@ -90,6 +90,12 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
       role: 'user',
     });
     const lindiRow = db.prepare('SELECT id FROM users WHERE email = ?').get('lindi@example.com');
+    const listed = await page(base, admin.cookies, '/users');
+    const people = db.prepare("SELECT id, color FROM users WHERE is_bot = 0").all();
+    for (const person of people) {
+      assert.match(listed.text, new RegExp(`style="background:${person.color}"`));
+      assert.match(listed.text, new RegExp(`form="user-${person.id}" type="radio" name="color" value="${person.color}" checked`));
+    }
     const form = await page(base, admin.cookies, '/tasks/new');
     const created = await post(base, admin.cookies, '/tasks', {
       _csrf: form.csrf,
