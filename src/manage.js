@@ -100,7 +100,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     LEFT JOIN projects p ON p.id = t.project_id
     ${projectId ? 'WHERE t.project_id = ?' : ''}
   `).all(...(projectId ? [projectId] : []));
-  const people = db.prepare('SELECT id, name FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE').all();
+  const people = db.prepare('SELECT id, name, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE').all();
   const links = db.prepare('SELECT task_id, user_id FROM task_assignees').all();
   const history = db.prepare('SELECT task_id, status, changed_at FROM task_status_history ORDER BY changed_at, id').all();
   const entries = db.prepare(`
@@ -120,6 +120,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
   }
   const live = tasks.filter((task) => !task.deleted_at);
   const names = new Map(people.map((person) => [person.id, person.name]));
+  const colors = new Map(people.map((person) => [person.id, person.color]));
   const firstStamp = live.reduce((min, task) => {
     const at = Date.parse(task.created_at);
     return Number.isFinite(at) ? Math.min(min, at) : min;
@@ -148,6 +149,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     return {
       id: person.id,
       name: person.name,
+      color: person.color,
       assigned: open.length,
       overdue: open.filter((task) => task.due_date && task.due_date < today).length,
       done: done.length,
@@ -243,7 +245,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
   const p85 = round1(percentile(sortedCycles, 0.85));
 
   const heatWeeks = slots.map((slot) => slot.label.slice(3));
-  const heatRows = sortedPeople.map((person) => ({ name: person.name, cells: [] }));
+  const heatRows = sortedPeople.map((person) => ({ name: person.name, color: person.color, cells: [] }));
   let heatMax = 1;
   slots.forEach((slot, slotIndex) => {
     sortedPeople.forEach((person, index) => {
@@ -257,8 +259,8 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
 
   const attention = [];
   for (const task of overdueNow.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))) {
-    const owner = (assignees.get(task.id) || []).map((id) => names.get(id)).filter(Boolean).join(', ') || 'Unassigned';
-    attention.push({ id: task.id, title: task.title, owner, note: 'overdue' });
+    const owners = (assignees.get(task.id) || []).map((id) => ({ name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
+    attention.push({ id: task.id, title: task.title, owners, note: 'overdue' });
     if (attention.length >= 8) break;
   }
   for (const task of live.filter((item) => item.status === 'review')) {
@@ -267,12 +269,12 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     const entered = [...rows].reverse().find((row) => row.status === 'review');
     const at = Date.parse(entered?.changed_at || task.created_at);
     if (nowMs - at <= 3 * 86400000) continue;
-    const owner = (assignees.get(task.id) || []).map((id) => names.get(id)).filter(Boolean).join(', ') || 'Unassigned';
-    attention.push({ id: task.id, title: task.title, owner, note: 'in review more than 3 days' });
+    const owners = (assignees.get(task.id) || []).map((id) => ({ name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
+    attention.push({ id: task.id, title: task.title, owners, note: 'in review more than 3 days' });
   }
   for (const task of openNow.filter((item) => !(assignees.get(item.id) || []).length)) {
     if (attention.some((item) => item.id === task.id) || attention.length >= 16) continue;
-    attention.push({ id: task.id, title: task.title, owner: 'Unassigned', note: 'unassigned' });
+    attention.push({ id: task.id, title: task.title, owners: [], note: 'unassigned' });
   }
 
   const projectRows = db.prepare('SELECT id, name FROM projects ORDER BY name COLLATE NOCASE').all().map((project) => {

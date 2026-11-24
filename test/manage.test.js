@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { nextColor, PALETTE } from '../src/colors.js';
 import { clampMonth, monthSpan } from '../src/manage.js';
 
 test('a past calendar month runs from the 1st to the next 1st in Johannesburg', () => {
@@ -18,6 +19,13 @@ test('this month stops at now', () => {
   assert.equal(span.end, now.getTime() + 1);
   assert.equal(span.current, true);
   assert.equal(span.label, 'Nov 2026');
+});
+
+test('a new user gets the least used colour from the palette', () => {
+  assert.equal(nextColor([]), PALETTE[0]);
+  assert.equal(nextColor(PALETTE), PALETTE[0]);
+  assert.equal(nextColor([PALETTE[0]]), PALETTE[1]);
+  assert.equal(PALETTE.includes('#f97316'), false);
 });
 
 test('the month stepper stays between the first task and the current month', () => {

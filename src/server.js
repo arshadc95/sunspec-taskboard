@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express from 'express';
 import multer from 'multer';
+import { isPaletteColor } from './colors.js';
 import { labelOf, PRIORITIES, STATUSES } from './constants.js';
 import { assertConfig, loadEnv, readConfig } from './config.js';
 import {
@@ -804,7 +805,8 @@ export function createApp(config) {
     if (target.role === 'superuser' && (role !== 'superuser' || !active)) {
       if (countOtherActiveSuperusers(db, target.id) < 1) return res.redirect('/users?msg=lastsuper');
     }
-    const updated = updateUser(db, target.id, { ...identity, role, active, password: password || undefined });
+    const color = isPaletteColor(req.body.color) ? String(req.body.color).toLowerCase() : undefined;
+    const updated = updateUser(db, target.id, { ...identity, role, active, password: password || undefined, color });
     if (updated.error) return res.redirect('/users?msg=email');
     res.redirect('/users?msg=saved');
   });

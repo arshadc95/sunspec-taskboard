@@ -658,7 +658,14 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .cal-head { min-height: 0; background: var(--header); font-weight: 700; text-transform: uppercase; }
 .cal-day.today { background: #fff7ed; }
 .cal-day.pad { background: #fafafa; }
-.chip { display: block; margin-top: 3px; padding: 1px 4px; text-decoration: none; background: #f3f4f6; font-weight: 600; }
+.swatch { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; vertical-align: middle; }
+.name-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.color-pick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.color-pick label { position: relative; display: inline-flex; padding: 3px; border: 1px solid transparent; cursor: pointer; }
+.color-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.color-pick input:checked + .swatch { outline: 1px solid #111; outline-offset: 2px; }
+.color-pick input:focus-visible + .swatch { outline: 2px solid #f97316; outline-offset: 2px; }
+.chip { display: flex; align-items: center; gap: 4px; margin-top: 3px; padding: 1px 4px; text-decoration: none; background: #f3f4f6; font-weight: 600; border-left: 3px solid #d4d4d4; }
 .chip.pri-high { background: #ffedd5; }
 .chip.pri-urgent { background: #fee2e2; }
 .chip.pri-med { background: #dbeafe; }

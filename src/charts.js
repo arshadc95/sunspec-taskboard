@@ -1,3 +1,5 @@
+import { isPaletteColor } from './colors.js';
+
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -161,13 +163,14 @@ export function heatMap(heatmap) {
   const weeks = heatmap?.weeks || [];
   if (!rows.length || !weeks.length) return '';
   const cell = 22;
-  const label = 110;
+  const label = 124;
   const w = label + weeks.length * cell;
   const h = 18 + rows.length * cell;
   const max = heatmap.max || 1;
   let body = weeks.map((week, index) => `<text x="${label + index * cell + 2}" y="12" font-size="9" fill="#555">${esc(week)}</text>`).join('');
   rows.forEach((row, rowIndex) => {
-    body += `<text x="0" y="${22 + rowIndex * cell + 12}" font-size="10" fill="#111">${esc(row.name)}</text>`;
+    if (isPaletteColor(row.color)) body += `<rect x="0" y="${22 + rowIndex * cell + 4}" width="8" height="8" fill="${row.color}"/>`;
+    body += `<text x="12" y="${22 + rowIndex * cell + 12}" font-size="10" fill="#111">${esc(row.name)}</text>`;
     row.cells.forEach((count, index) => {
       const shade = count ? 0.15 + 0.85 * (count / max) : 0.06;
       body += `<rect x="${label + index * cell}" y="${18 + rowIndex * cell}" width="${cell - 2}" height="${cell - 2}" fill="#f97316" opacity="${shade.toFixed(2)}"><title>${esc(row.name)} ${count}</title></rect>`;

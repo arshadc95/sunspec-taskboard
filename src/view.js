@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
+import { PALETTE, isPaletteColor } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
 import { formatDateTime, formatDue, isOverdue, shiftDate } from './time.js';
 
@@ -32,12 +33,21 @@ function textBlock(value) {
   return esc(value).replace(/\n/g, '<br>');
 }
 
+function swatch(color) {
+  if (!isPaletteColor(color)) return '';
+  return `<span class="swatch" style="background:${color}" aria-hidden="true"></span>`;
+}
+
+function nameLine(name, color) {
+  return `<span class="name-line">${swatch(color)}${esc(name)}</span>`;
+}
+
 function highlightMentions(body, users) {
   const slots = [];
   const marked = String(body || '').replace(/@\[([^\]]*)\]\((\d+)\)/g, (all, name, id) => {
     const user = (users || []).find((item) => String(item.id) === String(id));
     const label = esc(user?.name || name || 'someone');
-    const index = slots.push(`<span class="mention" data-user="${esc(id)}">@${label}</span>`) - 1;
+    const index = slots.push(`<span class="mention" data-user="${esc(id)}">${swatch(user?.color)}@${label}</span>`) - 1;
     return `\u0000${index}\u0000`;
   });
   let text = esc(marked);
@@ -48,7 +58,7 @@ function highlightMentions(body, users) {
     if (!needle) continue;
     const pattern = new RegExp(`@${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
     text = text.replace(pattern, () => {
-      const index = slots.push(`<span class="mention">@${label}</span>`) - 1;
+      const index = slots.push(`<span class="mention">${swatch(user.color)}@${label}</span>`) - 1;
       return `\u0000${index}\u0000`;
     });
   }
@@ -191,7 +201,7 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
   <div class="crumb">${crumb}</div>
   <div class="top-actions">${actions}</div>
   <div class="who">
-    <span class="who-name">${esc(user.name)}</span>
+    <span class="who-name">${nameLine(user.name, user.color)}</span>
     ${roleBadge(user.role)}
   </div>
 </header>
@@ -305,7 +315,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
         </label>
         <div class="field" data-assignee-field>
           <div class="label-row"><span>Assignees</span>${canEdit && currentUser ? `<button class="assign-link" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}</div>
-          <div class="assignee-chips" data-assignee-chips>${(value.assignees || []).map((person) => `<span class="assignee-chip" data-id="${person.id}">${esc(person.name)}<button type="button" data-remove-assignee aria-label="Remove ${esc(person.name)}">×</button></span>`).join('')}</div>
+          <div class="assignee-chips" data-assignee-chips>${(value.assignees || []).map((person) => `<span class="assignee-chip" data-id="${person.id}">${swatch(person.color)}${esc(person.name)}<button type="button" data-remove-assignee aria-label="Remove ${esc(person.name)}">×</button></span>`).join('')}</div>
           <input type="hidden" name="assignee_ids" value="${esc((value.assignee_ids || []).join(','))}" data-assignee-ids>
           <input class="assignee-search" placeholder="Search people" autocomplete="off" data-assignee-search ${off}>
         </div>
@@ -348,11 +358,18 @@ function projectScript(projects) {
   return `<script type="application/json" id="project-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
 }
 
+function assigneeMarks(task) {
+  return (task.assignees || []).map((person) => swatch(person.color)).join('');
+}
+
 function assigneeCell(task) {
-  const names = (task.assignees || []).map((person) => person.name);
-  if (!names.length) return '—';
-  if (names.length === 1) return esc(names[0]);
-  return `<span title="${esc(names.join(', '))}">${esc(names[0])} +${names.length - 1}</span>`;
+  const people = task.assignees || [];
+  if (!people.length) return '—';
+  const names = people.map((person) => person.name);
+  const label = names.length === 1
+    ? esc(names[0])
+    : `<span title="${esc(names.join(', '))}">${esc(names[0])} +${names.length - 1}</span>`;
+  return `<span class="name-line">${assigneeMarks(task)}${label}</span>`;
 }
 
 function removeControl(task, user, csrf, back, prominent = false) {
@@ -420,7 +437,7 @@ function taskCard(task, today, user, csrf, back) {
   const overdue = isOverdue(task.due_date, task.status, today);
   return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
     <div class="card-top"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}</div>
-    <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
+    <div class="card-meta">${esc(task.project_name || 'No project')} · ${task.assignees?.length ? assigneeCell(task) : 'Unassigned'}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
@@ -550,7 +567,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
-    ? `<p class="meta">Created by ${esc(task.creator_name || 'Unknown')} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${esc(task.reviewer_name)}</p>` : ''}`
+    ? `<p class="meta">Created by ${nameLine(task.creator_name || 'Unknown', task.creator_color)} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${nameLine(task.reviewer_name, task.reviewer_color)}</p>` : ''}`
     : '';
   const pageActions = !isNew
     ? `<div class="title-actions">${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? rowStatusActions(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`
@@ -561,7 +578,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         <h2>Comments <span class="group-count">${comments.length}</span></h2>
         ${comments.length ? comments.map((comment) => `
           <article class="comment">
-            <header><strong>${esc(comment.author_name)}</strong> <time>${esc(formatDateTime(comment.created_at))}</time></header>
+            <header><strong>${nameLine(comment.author_name, comment.author_color)}</strong> <time>${esc(formatDateTime(comment.created_at))}</time></header>
             <div class="comment-body">${highlightMentions(comment.body, users)}</div>
             ${fileLinks(comment.files)}
             ${kudosButton({
@@ -642,7 +659,10 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
       ? `<select form="user-${person.id}" name="role">${options(ROLES, person.role)}</select>`
       : '';
     return `<tr class="${person.active ? '' : 'inactive'}">
-      <td><input form="user-${person.id}" name="name" required maxlength="120" value="${esc(person.name)}"></td>
+      <td>
+        <span class="name-line">${swatch(person.color)}<input form="user-${person.id}" name="name" required maxlength="120" value="${esc(person.name)}"></span>
+        <div class="color-pick">${PALETTE.map((color) => `<label title="Colour"><input form="user-${person.id}" type="radio" name="color" value="${color}"${person.color === color ? ' checked' : ''}><i class="swatch" style="background:${color}"></i></label>`).join('')}</div>
+      </td>
       <td><input form="user-${person.id}" name="email" type="email" required value="${esc(person.email)}"></td>
       <td><div class="role-cell">${roleBadge(person.role)}${roleEditor}</div></td>
       <td><label class="check"><input form="user-${person.id}" type="checkbox" name="active" value="1"${person.active ? ' checked' : ''}${self ? ' disabled' : ''}> Active</label></td>
@@ -791,7 +811,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
         </tr></thead>
         <tbody>
           ${board.people.map((person) => `<tr>
-            <td><a href="/?assignee=${person.id}">${esc(person.name)}</a></td>
+            <td><a href="/?assignee=${person.id}">${nameLine(person.name, person.color)}</a></td>
             <td class="num">${person.assigned}</td>
             <td class="num">${person.done}</td>
             <td class="num">${ring(person.onTimePct)} ${person.onTimePct == null ? '—' : `${person.onTimePct}%`}</td>
@@ -813,7 +833,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       <tbody>${(board.monthRows || []).map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.created}</td><td class="num">${row.done}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.avg == null ? '—' : row.avg}</td></tr>`).join('')}</tbody>
     </table></div>`)}
     <div class="manage-grid">
-      ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
+      ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${item.owners?.length ? item.owners.map((person) => nameLine(person.name, person.color)).join(' ') : 'Unassigned'} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
       ${manageCard('By project', 'Open, overdue, and finished tasks in this period.', `<div class="table-wrap"><table class="grid">
           <thead><tr><th>Project</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Done</th></tr></thead>
           <tbody>${board.projects.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.open}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.done}</td></tr>`).join('') || '<tr><td colspan="4">No project work in this period.</td></tr>'}</tbody>
@@ -854,7 +874,9 @@ function weekCells(anchor) {
 function chip(task, today) {
   const overdue = isOverdue(task.due_date, task.status, today);
   const done = task.status === 'done';
-  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${done ? ' done' : ''}" href="/tasks/${task.id}">${esc(task.title)}</a>`;
+  const first = (task.assignees || []).find((person) => isPaletteColor(person.color));
+  const bar = first ? ` style="border-left-color:${first.color}"` : '';
+  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${done ? ' done' : ''}"${bar} href="/tasks/${task.id}">${assigneeMarks(task)}${esc(task.title)}</a>`;
 }
 
 export function renderCalendar({ user, csrf, msg, tasks, filters, users, projects, today, view, year, month, anchor }) {
@@ -917,7 +939,7 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
     </section>
     <section class="plain-block">
       <h2>No due date</h2>
-      ${undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>'}
+      ${undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${task.assignees?.length ? assigneeCell(task) : 'Unassigned'}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>'}
     </section>`;
   return layout({
     title: 'Calendar · Sunspec',
@@ -938,7 +960,7 @@ export function renderTeam({ user, csrf, rows }) {
         <thead><tr><th>Person</th><th class="num">Done this week</th><th class="num">Done this month</th><th class="num">Hours this week</th><th class="num">Hours this month</th><th class="num">On time</th><th class="num">Streak</th></tr></thead>
         <tbody>
           ${rows.length ? rows.map((row) => `<tr>
-            <td>${esc(row.name)}</td>
+            <td>${nameLine(row.name, row.color)}</td>
             <td class="num">${row.weekCount}</td>
             <td class="num">${row.monthCount}</td>
             <td class="num">${row.weekHours}</td>

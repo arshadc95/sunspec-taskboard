@@ -123,7 +123,7 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
       body: 'Please check this @Lindi Nkosi',
     });
     const mentioned = await page(base, admin.cookies, `/tasks/${taskId}`);
-    assert.match(mentioned.text, /class="mention">@Lindi Nkosi</);
+    assert.match(mentioned.text, /class="mention"[^>]*>[\s\S]*?@Lindi Nkosi</);
 
     const lindi = await login(base, 'lindi@example.com', 'lindi-password');
     const mentions = await page(base, lindi.cookies, '/?mentions=1');

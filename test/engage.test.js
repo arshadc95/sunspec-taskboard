@@ -122,12 +122,12 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     );
     const inReview = await page(base, thabang, '/');
     assert.match(inReview.text, /Review <span class="group-count">1<\/span>/);
-    assert.match(inReview.text, /Reviewer: Arshad/);
+    assert.match(inReview.text, /Reviewer:[\s\S]*?Arshad/);
     assert.doesNotMatch(inReview.text, /data-send-review/);
     const reviewMentions = await page(base, admin, '/?mentions=1');
     assert.match(reviewMentions.text, /Site visit/);
     const detail = await page(base, admin, `/tasks/${taskId}`);
-    assert.match(detail.text, /Reviewer: Arshad/);
+    assert.match(detail.text, /Reviewer:[\s\S]*?Arshad/);
     assert.match(detail.text, /Check the meter/);
     const stranger = await post(base, admin, `/tasks/${taskId}/timer/start`, { _csrf: users.csrf });
     assert.equal(stranger.status, 403);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { nextColor } from './colors.js';
 import { hashPassword } from './passwords.js';
 import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, todayDate } from './time.js';
 
@@ -229,9 +230,26 @@ function migrate(db) {
   if (!userColumns.some((column) => column.name === 'is_bot')) {
     db.exec('ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0');
   }
+  const colorColumns = db.prepare('PRAGMA table_info(users)').all();
+  if (!colorColumns.some((column) => column.name === 'color')) {
+    db.exec('ALTER TABLE users ADD COLUMN color TEXT');
+  }
   relaxGrokThreads(db);
   backfillTaskAssignees(db);
   backfillStatusHistory(db);
+  backfillUserColors(db);
+}
+
+function backfillUserColors(db) {
+  const missing = db.prepare("SELECT id FROM users WHERE color IS NULL OR color = '' ORDER BY id").all();
+  if (!missing.length) return;
+  const used = db.prepare("SELECT color FROM users WHERE color IS NOT NULL AND color != ''").all().map((row) => row.color);
+  const update = db.prepare('UPDATE users SET color = ? WHERE id = ?');
+  for (const row of missing) {
+    const color = nextColor(used);
+    update.run(color, row.id);
+    used.push(color);
+  }
 }
 
 function recordStatus(db, taskId, status, changedAt) {
@@ -309,10 +327,11 @@ export function upsertSuperuser(db, { email, password, name }) {
 export function createUser(db, { email, name, password, role }) {
   const now = new Date().toISOString();
   try {
+    const used = db.prepare("SELECT color FROM users WHERE color IS NOT NULL AND color != ''").all().map((row) => row.color);
     const info = db.prepare(`
-      INSERT INTO users (email, name, password_hash, role, active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 1, ?, ?)
-    `).run(email, name, hashPassword(password), role, now, now);
+      INSERT INTO users (email, name, password_hash, role, active, color, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+    `).run(email, name, hashPassword(password), role, nextColor(used), now, now);
     return { id: Number(info.lastInsertRowid) };
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) return { error: 'email' };
@@ -320,7 +339,7 @@ export function createUser(db, { email, name, password, role }) {
   }
 }
 
-export function updateUser(db, id, { email, name, role, active, password }) {
+export function updateUser(db, id, { email, name, role, active, password, color }) {
   const now = new Date().toISOString();
   try {
     db.prepare(`
@@ -328,6 +347,7 @@ export function updateUser(db, id, { email, name, role, active, password }) {
       SET email = ?, name = ?, role = ?, active = ?, updated_at = ?
       WHERE id = ?
     `).run(email, name, role, active ? 1 : 0, now, id);
+    if (color) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, id);
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) return { error: 'email' };
     throw error;
@@ -350,14 +370,14 @@ export function getUserByEmail(db, email) {
 export function listUsers(db, actor) {
   if (actor.role === 'admin') {
     return db.prepare(`
-      SELECT id, email, name, role, active, created_at
+      SELECT id, email, name, role, active, color, created_at
       FROM users
       WHERE role = 'user' AND is_bot = 0
       ORDER BY active DESC, name COLLATE NOCASE
     `).all();
   }
   return db.prepare(`
-    SELECT id, email, name, role, active, created_at
+    SELECT id, email, name, role, active, color, created_at
     FROM users
     WHERE is_bot = 0
     ORDER BY active DESC, CASE role WHEN 'superuser' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, name COLLATE NOCASE
@@ -366,7 +386,7 @@ export function listUsers(db, actor) {
 
 export function listActiveUsers(db) {
   return db.prepare(`
-    SELECT id, email, name, role, active
+    SELECT id, email, name, role, active, color
     FROM users
     WHERE active = 1 AND is_bot = 0
     ORDER BY name COLLATE NOCASE
@@ -477,7 +497,9 @@ export function listTasks(db, filters) {
     SELECT t.*,
       a.name AS assignee_name,
       c.name AS creator_name,
+      c.color AS creator_color,
       r.name AS reviewer_name,
+      r.color AS reviewer_color,
       p.name AS project_name,
       (SELECT COUNT(*) FROM comments cm WHERE cm.task_id = t.id) AS comment_count
     FROM tasks t
@@ -509,7 +531,9 @@ export function getTask(db, id) {
     SELECT t.*,
       a.name AS assignee_name,
       c.name AS creator_name,
+      c.color AS creator_color,
       r.name AS reviewer_name,
+      r.color AS reviewer_color,
       p.name AS project_name,
       (SELECT COUNT(*) FROM comments cm WHERE cm.task_id = t.id) AS comment_count
     FROM tasks t
@@ -570,7 +594,7 @@ function attachAssignees(db, rows) {
   if (!rows.length) return rows;
   const marks = rows.map(() => '?').join(',');
   const links = db.prepare(`
-    SELECT ta.task_id, u.id, u.name
+    SELECT ta.task_id, u.id, u.name, u.color
     FROM task_assignees ta
     JOIN users u ON u.id = ta.user_id
     WHERE ta.task_id IN (${marks})
@@ -579,7 +603,7 @@ function attachAssignees(db, rows) {
   const byTask = new Map();
   for (const link of links) {
     if (!byTask.has(link.task_id)) byTask.set(link.task_id, []);
-    byTask.get(link.task_id).push({ id: link.id, name: link.name });
+    byTask.get(link.task_id).push({ id: link.id, name: link.name, color: link.color });
   }
   return rows.map((row) => {
     const people = byTask.get(row.id) || [];
@@ -650,7 +674,7 @@ export function restoreTask(db, id) {
 
 export function listComments(db, taskId) {
   return db.prepare(`
-    SELECT c.*, u.name AS author_name
+    SELECT c.*, u.name AS author_name, u.color AS author_color
     FROM comments c
     JOIN users u ON u.id = c.author_id
     WHERE c.task_id = ?
@@ -1151,7 +1175,7 @@ export function teamBoard(db, now = Date.now()) {
   const today = todayDate(moment);
   const weekIso = startOfWeekIso(moment);
   const monthIso = startOfMonthIso(moment);
-  const people = db.prepare("SELECT id, name FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE").all();
+  const people = db.prepare("SELECT id, name, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE").all();
   const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
   const members = new Map();
   for (const link of db.prepare('SELECT task_id, user_id FROM task_assignees').all()) {
@@ -1197,6 +1221,7 @@ export function teamBoard(db, now = Date.now()) {
     return {
       id: person.id,
       name: person.name,
+      color: person.color,
       weekCount,
       monthCount,
       weekHours: hoursFrom(userEntries, weekIso, now),
