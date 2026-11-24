@@ -37,6 +37,48 @@ test('coach stays constructive and waits for enough data', () => {
   assert.doesNotMatch(text, /worst|rank|underperform|\bWIP\b|throughput/i);
 });
 
+test('the workload tip only appears when the load is lopsided', () => {
+  function balance(facts) {
+    return coachTips(facts).find((item) => item.id === 'balance') || null;
+  }
+  const crowded = {
+    open: 6,
+    people: [
+      { id: 1, name: 'Arshad Chengadu', open: 5, overdue: 0, inProgress: 1 },
+      { id: 2, name: 'Lindi Nkosi', open: 1, overdue: 0, inProgress: 0 },
+    ],
+  };
+  const other = balance({ ...crowded, viewerId: 2 });
+  assert.equal(other.text, 'Most of the open work is with Arshad.');
+  assert.doesNotMatch(other.text, /Chengadu|Worth seeing/);
+  const self = balance({ ...crowded, viewerId: 1 });
+  assert.equal(self.text, "You're holding most of the open work. Worth handing some off.");
+  assert.equal(balance({
+    open: 5,
+    viewerId: 2,
+    people: [
+      { id: 1, name: 'Arshad Chengadu', open: 5, overdue: 0, inProgress: 1 },
+      { id: 2, name: 'Lindi Nkosi', open: 0, overdue: 0, inProgress: 0 },
+    ],
+  }), null);
+  assert.equal(balance({
+    open: 8,
+    viewerId: 2,
+    people: [
+      { id: 1, name: 'Arshad Chengadu', open: 4, overdue: 0, inProgress: 1 },
+      { id: 2, name: 'Lindi Nkosi', open: 4, overdue: 0, inProgress: 0 },
+    ],
+  }), null);
+  assert.equal(balance({
+    open: 4,
+    viewerId: 2,
+    people: [
+      { id: 1, name: 'Arshad Chengadu', open: 3, overdue: 0, inProgress: 1 },
+      { id: 2, name: 'Lindi Nkosi', open: 1, overdue: 0, inProgress: 0 },
+    ],
+  }), null);
+});
+
 test('coach can say something kind when the week went well', () => {
   const tips = coachTips({
     periodDays: 30,

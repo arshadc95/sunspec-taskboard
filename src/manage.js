@@ -91,7 +91,7 @@ function onTimeRate(tasks) {
   return Math.round((ok / withDue.length) * 100);
 }
 
-export function buildManage(db, { projectId = null, month = null, sort = 'name', dir = 'asc', now = new Date() } = {}) {
+export function buildManage(db, { projectId = null, month = null, sort = 'name', dir = 'asc', now = new Date(), viewerId = null } = {}) {
   const today = todayDate(now);
   const nowMs = now.getTime();
   const tasks = db.prepare(`
@@ -357,6 +357,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
       periodDays: Math.max(1, Math.ceil(spanMs / 86400000)),
       historyDays: Math.max(1, Math.ceil(spanMs / 86400000)),
       open: openNow.length,
+      viewerId,
       people: personStats.map((person) => ({ ...person, open: person.assigned })),
       reviewStuck,
       staleProgress,

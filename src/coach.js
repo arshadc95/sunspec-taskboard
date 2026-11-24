@@ -50,11 +50,16 @@ export function coachTips(facts) {
     ));
   }
 
-  const busiest = [...people].sort((a, b) => b.open - a.open)[0];
-  if (busiest && open >= 4 && busiest.open / open > 0.5) {
+  const holders = people.filter((person) => (person.open || 0) > 0);
+  const busiest = [...holders].sort((a, b) => b.open - a.open)[0];
+  if (holders.length >= 2 && busiest && busiest.open >= 4 && open > 0 && busiest.open / open > 0.5) {
+    const mine = facts.viewerId != null && Number(facts.viewerId) === Number(busiest.id);
+    const first = String(busiest.name || '').trim().split(/\s+/)[0] || 'Someone';
     issues.push(tip(
       'balance',
-      `Most of the open work is with ${busiest.name}. Worth seeing who else has space.`,
+      mine
+        ? "You're holding most of the open work. Worth handing some off."
+        : `Most of the open work is with ${first}.`,
       `/?assignee=${busiest.id}`,
     ));
   }
