@@ -1043,7 +1043,8 @@ function teamTasks(row) {
   return `<div class="person-tasks">${body}<p class="person-more">${extra}</p></div>`;
 }
 
-function teamCard(row) {
+function teamCard(row, teamMax) {
+  const caption = `${row.open} open of team max ${teamMax}`;
   return `<article class="person-card">
     <h2>${nameLine(row.name, row.color, row.id)}${roleBadge(row.role)}</h2>
     <div class="person-nums">
@@ -1052,14 +1053,18 @@ function teamCard(row) {
       <div><span>Done this month</span><strong>${row.monthCount}</strong></div>
     </div>
     <p class="person-small"><span>${hoursLabel(row.monthHours)} this month</span><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
-    <div class="load-track" title="${row.open} open"><span class="w-${Math.max(0, Math.min(100, Math.round(row.load || 0)))}"></span></div>
+    <div class="load" title="Workload: ${esc(caption)}">
+      <p class="load-label"><span>Workload</span><span>${esc(caption)}</span></p>
+      <div class="load-track"><span class="w-${Math.max(0, Math.min(100, Math.round(row.load || 0)))}"></span></div>
+    </div>
     ${teamTasks(row)}
   </article>`;
 }
 
 export function renderTeam({ user, csrf, rows }) {
+  const teamMax = rows.reduce((max, row) => Math.max(max, row.open || 0), 0);
   const body = `
-    ${sheet('Team', rows.length ? `<div class="team-grid">${rows.map((row) => teamCard(row)).join('')}</div>` : '<p class="hint">No active people yet.</p>')}`;
+    ${sheet('Team', rows.length ? `<div class="team-grid">${rows.map((row) => teamCard(row, teamMax)).join('')}</div>` : '<p class="hint">No active people yet.</p>')}`;
   return layout({
     title: 'Team · Sunspec',
     user,
