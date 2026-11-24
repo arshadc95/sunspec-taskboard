@@ -31,10 +31,15 @@ if (standardRoot && standardList.length) {
   const tag = standardRoot.querySelector('[data-std-tag]');
   const tip = standardRoot.querySelector('[data-std-tip]');
   const more = standardRoot.querySelector('[data-std-more]');
+  const deck = [
+    ...standardList.filter((item) => item.kind !== 'concept'),
+    ...standardList.filter((item) => item.kind === 'concept'),
+  ];
+  const standardCount = Math.max(1, deck.filter((item) => item.kind !== 'concept').length);
   let index = 0;
   const show = (next, remember) => {
-    index = (next + standardList.length) % standardList.length;
-    const item = standardList[index];
+    index = (next + deck.length) % deck.length;
+    const item = deck[index];
     if (code) code.textContent = item.code;
     if (summary) summary.textContent = item.summary;
     if (tag) tag.textContent = item.category;
@@ -49,9 +54,9 @@ if (standardRoot && standardList.length) {
   };
   let last = '';
   try { last = localStorage.getItem('std-last') || ''; } catch { /* private mode */ }
-  let start = Math.floor(Math.random() * standardList.length);
-  if (standardList.length > 1 && standardList[start].id === last) {
-    start = (start + 1 + Math.floor(Math.random() * (standardList.length - 1))) % standardList.length;
+  let start = Math.floor(Math.random() * standardCount);
+  if (standardCount > 1 && deck[start].id === last) {
+    start = (start + 1 + Math.floor(Math.random() * (standardCount - 1))) % standardCount;
   }
   show(start, true);
   standardRoot.querySelector('[data-std-prev]')?.addEventListener('click', () => show(index - 1, true));

@@ -484,11 +484,11 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
       </div>
       <div class="std" data-standard>
-        <span class="std-kicker">Standard &amp; tip</span>
+        <span class="std-kicker">Standard</span>
         <button type="button" class="std-nav" data-std-prev aria-label="Previous standard">‹</button>
         <span class="std-tag" data-std-tag>${esc(first.category)}</span>
         <span class="std-line" data-std-line><strong data-std-code>${esc(first.code)}</strong> <span data-std-summary>${esc(first.summary)}</span></span>
-        <button type="button" class="std-more" data-std-more aria-expanded="false">Tip</button>
+        <button type="button" class="std-more" data-std-more aria-expanded="false">Why</button>
         <button type="button" class="std-nav" data-std-next aria-label="Next standard">›</button>
         <p class="std-detail" data-std-tip hidden>${esc(first.tip)}</p>
       </div>
