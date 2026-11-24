@@ -425,7 +425,18 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     const inline = await fetch(`${base}/files/${fileId}?inline=1`, { headers: { cookie: admin.header() } });
     assert.equal(inline.status, 200);
     assert.match(inline.headers.get('content-disposition'), /^inline; filename="quote\.pdf"/);
+    assert.equal(inline.headers.get('content-type'), 'application/pdf');
+    assert.equal(inline.headers.get('x-frame-options'), 'SAMEORIGIN');
+    assert.match(inline.headers.get('content-security-policy'), /frame-ancestors 'self'/);
+    assert.equal(inline.headers.get('content-security-policy').includes("frame-ancestors 'none'"), false);
     assert.equal(Buffer.from(await inline.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+    assert.equal(download.headers.get('x-frame-options'), 'DENY');
+    const pageHeaders = await fetch(`${base}/`, { headers: { cookie: admin.header() } });
+    assert.equal(pageHeaders.headers.get('x-frame-options'), 'DENY');
+    assert.match(pageHeaders.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    const loggedOut = await fetch(`${base}/files/${fileId}?inline=1`, { redirect: 'manual' });
+    assert.equal(loggedOut.status, 302);
+    assert.equal(loggedOut.headers.get('x-frame-options'), 'DENY');
 
     const users = await page(base, admin, '/users');
     await post(base, admin, '/users', {
