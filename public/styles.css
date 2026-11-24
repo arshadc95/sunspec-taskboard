@@ -420,7 +420,8 @@ tr.task-row:hover td { background: #fff7ed; }
 .form-footer .btn { height: 36px; flex: 0 0 auto; min-width: 140px; border-radius: 0; font-weight: 700; }
 .form-footer .btn-primary { background: #f97316; border-color: #f97316; color: #fff; }
 .form-footer .btn-line { background: #fff; color: #111; border: 1px solid #111; }
-.drawer { display: flex; flex-direction: column; }
+dialog.drawer:not([open]) { display: none; }
+dialog.drawer[open] { display: flex; flex-direction: column; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 [data-assignee-field] { position: relative; }
 .assignee-chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -438,7 +439,7 @@ tr.task-row:hover td { background: #fff7ed; }
 #task-drawer::backdrop { background: rgba(0, 0, 0, 0.5); }
 #task-drawer .task-form, #task-drawer .form-sections { background: #fff; height: auto; }
 #task-drawer .form-sections { max-height: calc(90vh - 120px); }
-#task-drawer .form-card { background: transparent; }
+#task-drawer .form-card { background: transparent; overflow: visible; }
 #task-drawer .form-card h2 { display: none; }
 #task-drawer .form-card > .field { padding: 0 0 16px; }
 @media (max-width: 800px) {
@@ -448,14 +449,15 @@ tr.task-row:hover td { background: #fff7ed; }
 }
 .combo { display: flex; flex-direction: column; gap: 4px; position: relative; }
 .mention-menu, .combo-menu {
-  position: absolute;
-  z-index: 20;
+  z-index: 40;
   background: #fff;
   border: 1px solid var(--line);
-  min-width: 180px;
-  max-height: 180px;
+  max-height: 240px;
   overflow: auto;
 }
+.mention-menu { position: absolute; min-width: 180px; }
+.combo-menu { position: absolute; margin: 0; }
+.mention-menu[hidden], .combo-menu[hidden] { display: none; }
 .mention-menu button, .combo-menu button { display: block; width: 100%; text-align: left; background: #fff; border: 0; padding: 6px 8px; cursor: pointer; }
 .mention-menu button.active, .combo-menu button:hover, .mention-menu button:hover { background: #fff7ed; }
 .toast {
@@ -686,7 +688,6 @@ table.users td { min-width: 90px; }
 @keyframes grok-dot { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .grok-dots i { animation: none; opacity: 1; } }
 .grok-head [data-grok-sound][aria-pressed="false"] { opacity: .45; }
-.grok-panel[hidden] { display: none; }
 .grok-panel {
   position: fixed;
   right: 16px;
@@ -702,6 +703,7 @@ table.users td { min-width: 90px; }
   overflow: hidden;
   font-family: Inter, sans-serif;
 }
+.grok-panel[hidden] { display: none; }
 .grok-head {
   display: flex;
   align-items: center;

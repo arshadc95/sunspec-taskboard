@@ -109,9 +109,14 @@ document.querySelectorAll('[data-close-drawer]').forEach((button) => {
   button.addEventListener('click', () => drawer?.close());
 });
 if (drawer?.hasAttribute('data-open')) openDrawer();
+drawer?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  drawer.close();
+});
 drawer?.addEventListener('click', (event) => {
   if (event.target === drawer) drawer.close();
 });
+drawer?.querySelector('.task-form')?.addEventListener('submit', () => drawer.close());
 document.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
@@ -190,12 +195,40 @@ document.querySelectorAll('[data-assign-me]').forEach((button) => {
     if (field && person) addAssignee(field, person.id, person.name);
   });
 });
+function hideOtherMenus(menu) {
+  document.querySelectorAll('.combo-menu').forEach((other) => {
+    if (other !== menu) other.hidden = true;
+  });
+}
+function placeCombo(menu, input) {
+  const box = input.getBoundingClientRect();
+  const host = input.closest('dialog') || document.body;
+  if (menu.parentElement !== host) host.append(menu);
+  if (host.tagName === 'DIALOG') {
+    const origin = host.getBoundingClientRect();
+    menu.style.position = 'absolute';
+    menu.style.top = `${Math.round(box.bottom - origin.top)}px`;
+    menu.style.left = `${Math.round(box.left - origin.left)}px`;
+  } else {
+    menu.style.position = 'fixed';
+    menu.style.top = `${Math.round(box.bottom)}px`;
+    menu.style.left = `${Math.round(box.left)}px`;
+  }
+  menu.style.width = `${Math.round(box.width)}px`;
+  menu.style.zIndex = '40';
+}
+function watchMenu(menu, input) {
+  const place = () => { if (!menu.hidden) placeCombo(menu, input); };
+  input.closest('.form-sections')?.addEventListener('scroll', place);
+  window.addEventListener('resize', place);
+  window.addEventListener('scroll', place, true);
+}
 document.querySelectorAll('[data-assignee-search]').forEach((input) => {
   const field = input.closest('[data-assignee-field]');
   const menu = document.createElement('div');
   menu.className = 'combo-menu';
   menu.hidden = true;
-  input.parentElement?.append(menu);
+  watchMenu(menu, input);
   let index = 0;
   const render = () => {
     const query = input.value.trim().toLowerCase();
@@ -216,6 +249,10 @@ document.querySelectorAll('[data-assignee-search]').forEach((input) => {
       menu.append(choice);
     });
     menu.hidden = matches.length === 0;
+    if (!menu.hidden) {
+      hideOtherMenus(menu);
+      placeCombo(menu, input);
+    }
   };
   input.addEventListener('input', () => { index = 0; render(); });
   input.addEventListener('focus', render);
@@ -231,12 +268,12 @@ document.querySelectorAll('[data-assignee-search]').forEach((input) => {
   input.addEventListener('blur', () => { window.setTimeout(() => { menu.hidden = true; }, 150); });
 });
 
-function attachCombo(input, hidden, items, label) {
+function attachCombo(input, hidden, items) {
   if (!input || !hidden) return;
   const menu = document.createElement('div');
   menu.className = 'combo-menu';
   menu.hidden = true;
-  input.parentElement?.append(menu);
+  watchMenu(menu, input);
   let index = 0;
   const render = () => {
     const query = input.value.trim().toLowerCase();
@@ -256,6 +293,10 @@ function attachCombo(input, hidden, items, label) {
       menu.append(choice);
     });
     menu.hidden = matches.length === 0;
+    if (!menu.hidden) {
+      hideOtherMenus(menu);
+      placeCombo(menu, input);
+    }
   };
   input.addEventListener('input', () => { hidden.value = ''; index = 0; render(); });
   input.addEventListener('focus', render);
@@ -273,10 +314,10 @@ function attachCombo(input, hidden, items, label) {
 }
 
 document.querySelectorAll('[data-project-input]').forEach((input) => {
-  attachCombo(input, input.parentElement.querySelector('[data-project-id]'), readJson('project-data'), 'project');
+  attachCombo(input, input.parentElement.querySelector('[data-project-id]'), readJson('project-data'));
 });
 document.querySelectorAll('[data-user-input]').forEach((input) => {
-  attachCombo(input, input.parentElement.querySelector('[data-user-id]'), readJson('people-data'), 'person');
+  attachCombo(input, input.parentElement.querySelector('[data-user-id]'), readJson('people-data'));
 });
 
 const mentionMenu = document.createElement('div');

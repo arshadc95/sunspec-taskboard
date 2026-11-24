@@ -532,6 +532,12 @@ test('a task can have several assignees', { timeout: 60000 }, async () => {
     const sheet = await css.text();
     assert.match(sheet, /#task-drawer\.drawer[\s\S]*width: min\(640px/);
     assert.match(sheet, /#task-drawer::backdrop \{ background: rgba\(0, 0, 0, 0\.5\)/);
+    assert.match(sheet, /dialog\.drawer\[open\]\s*\{[^}]*display:\s*flex/);
+    assert.match(sheet, /dialog\.drawer:not\(\[open\]\)\s*\{[^}]*display:\s*none/);
+    assert.equal(/\.drawer\s*\{[^}]*display:\s*flex/.test(sheet), false);
+    assert.match(sheet, /\.combo-menu\s*\{[^}]*\}/);
+    assert.match(sheet, /max-height:\s*240px/);
+    assert.equal(board.text.includes('<dialog id="task-drawer" class="drawer" open'), false);
     const now = new Date().toISOString();
     const legacy = db.prepare(`
       INSERT INTO tasks (title, description, assignee_id, status, created_by, created_at, updated_at)

@@ -259,7 +259,7 @@ function options(pairs, selected, blank) {
   return html.join('');
 }
 
-function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, from }) {
+function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, from, autofocus = true }) {
   const value = task || {};
   const projectName = value.project_name || '';
   const due = value.due_date || '';
@@ -280,7 +280,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
       <section class="form-card">
         <h2>Details</h2>
         <label class="field"><span>Title</span>
-          <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit ? 'autofocus' : ''}>
+          <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit && autofocus ? 'autofocus' : ''}>
         </label>
         <label class="field"><span>Description</span>
           <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
@@ -524,7 +524,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
     ${openGroups.length || doneRows.length ? sheet('Tasks', table, true) : sheet('Tasks', '<p class="empty">No tasks match these filters.</p>')}
       <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
       <div class="drawer-bar"><h2>New task</h2><button type="button" class="drawer-close" data-close-drawer aria-label="Close">×</button></div>
-      ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board' })}
+      ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board', autofocus: false })}
     </dialog>
     <a class="fab" href="/tasks/new" data-open-drawer aria-label="New task">+</a>
     ${projectScript(projects)}`;
