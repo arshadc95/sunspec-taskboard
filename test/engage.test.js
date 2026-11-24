@@ -127,6 +127,22 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     const team = await page(base, admin, '/team');
     assert.match(team.text, /Thabang Madikgetla/);
     assert.match(team.text, /On time/);
+    const denied = await post(base, thabang, `/tasks/${taskId}/delete`, { _csrf: opened.csrf });
+    assert.equal(denied.status, 403);
+    const removed = await post(base, admin, `/tasks/${taskId}/delete`, { _csrf: users.csrf, back: '/' });
+    assert.equal(removed.status, 302);
+    assert.equal(db.prepare('SELECT deleted_at IS NOT NULL AS gone FROM tasks WHERE id = ?').get(taskId).gone, 1);
+    const hidden = await page(base, admin, '/');
+    assert.doesNotMatch(hidden.text, />Site visit</);
+    const calendarGone = await page(base, admin, '/calendar');
+    assert.doesNotMatch(calendarGone.text, /Site visit/);
+    const adminUsers = await page(base, admin, '/users');
+    assert.match(adminUsers.text, /Removed/);
+    assert.match(adminUsers.text, /Site visit/);
+    const restored = await post(base, admin, `/tasks/${taskId}/restore`, { _csrf: users.csrf });
+    assert.equal(restored.status, 302);
+    const visible = await page(base, admin, '/');
+    assert.match(visible.text, /Site visit/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();

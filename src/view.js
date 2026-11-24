@@ -293,6 +293,15 @@ function rowTimer(task, user, csrf, back) {
   </form>`;
 }
 
+function removeControl(task, user, csrf, back, prominent = false) {
+  if (!(user.role === 'superuser' || user.role === 'admin' || task.created_by === user.id)) return '';
+  return `<form class="row-remove" method="post" action="/tasks/${task.id}/delete" data-confirm="Remove this task from the board?">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <input type="hidden" name="back" value="${esc(back)}">
+    <button class="btn ${prominent ? '' : 'btn-tiny'} icon-btn-trash" type="submit" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  </form>`;
+}
+
 function completeControl(task, user, csrf, back, prominent = false) {
   if (task.status === 'done' || !(user.role === 'superuser' || user.role === 'admin' || task.created_by === user.id || task.assignee_id === user.id)) return '';
   return `<form class="row-complete" method="post" action="/tasks/${task.id}/complete">
@@ -317,7 +326,7 @@ function taskCard(task, today, user, csrf, back) {
     ? `<span class="timer-live" data-started="${esc(mine.started_at)}"><strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></span>`
     : esc(formatDuration(task.time_seconds || 0));
   return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <div class="card-top">${completeControl(task, user, csrf, back)}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></div>
+    <div class="card-top"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
@@ -326,6 +335,7 @@ function taskCard(task, today, user, csrf, back) {
       <span class="time">${timerMark(task, user)}${time}${rowTimer(task, user, csrf, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
+    <div class="card-actions">${removeControl(task, user, csrf, back)}${completeControl(task, user, csrf, back)}</div>
   </article>`;
 }
 
@@ -333,7 +343,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
   const overdue = isOverdue(task.due_date, task.status, today);
   const added = String(highlight || '') === String(task.id);
   return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <td class="task-cell">${completeControl(task, user, csrf, back)}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
+    <td class="task-cell"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
     <td>${esc(task.project_name || '—')}</td>
     <td>${esc(task.assignee_name || '—')}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
@@ -342,6 +352,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     ${timeCell(task, user, csrf, back)}
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
+    <td class="row-actions">${removeControl(task, user, csrf, back)}${completeControl(task, user, csrf, back)}</td>
   </tr>`;
 }
 
@@ -357,10 +368,10 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const cards = tasks.filter((task) => task.status !== 'done' || showDone).map((task) => taskCard(task, today, user, csrf, back)).join('');
   const table = `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
-          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th>
+          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th><th></th>
         </tr></thead>
         <tbody>
-          <tr class="quick-add"><td colspan="9">
+          <tr class="quick-add"><td colspan="10">
             <form class="quick-form" method="post" action="/tasks">
               <input type="hidden" name="_csrf" value="${esc(csrf)}">
               <input type="hidden" name="quick" value="1">
@@ -373,10 +384,10 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
             </form>
           </td></tr>
           ${openGroups.map((group) => `
-            <tr class="group"><td colspan="9">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
+            <tr class="group"><td colspan="10">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
             ${group.rows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}
           `).join('')}
-          ${doneRows.length ? `<tr class="group"><td colspan="9"><button type="button" class="done-toggle" data-done-toggle aria-expanded="${showDone ? 'true' : 'false'}">Done <span class="group-count">${doneRows.length}</span></button></td></tr>` : ''}
+          ${doneRows.length ? `<tr class="group"><td colspan="10"><button type="button" class="done-toggle" data-done-toggle aria-expanded="${showDone ? 'true' : 'false'}">Done <span class="group-count">${doneRows.length}</span></button></td></tr>` : ''}
         </tbody>
         ${doneRows.length ? `<tbody class="done-rows"${showDone ? '' : ' hidden'}>${doneRows.map((task) => taskRow(task, today, user, csrf, back, highlight)).join('')}</tbody>` : ''}
       </table></div>
@@ -398,7 +409,6 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
       ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
     </section>
     <div class="board-tools">
-      <a class="btn btn-primary btn-lg" href="/tasks/new" data-open-drawer>+ New task</a>
       <form class="filters" method="get" action="/" data-live>
         <button type="button" class="btn filters-toggle" data-filters-toggle>Filters</button>
         <div class="filters-body">
@@ -447,6 +457,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
     people: users,
     active: filters.mentions ? 'at' : 'tasks',
     crumb: `<span>Tasks</span> <span class="count-pill">${counts.open}</span> <span class="crumb-meta">${counts.overdue} overdue</span>`,
+    actions: '<a class="subbar-new" href="/tasks/new" data-open-drawer>+ New task</a>',
     body,
   });
 }
@@ -490,11 +501,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
   const meta = !isNew
     ? `<p class="meta">Created by ${esc(task.creator_name || 'Unknown')} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>`
     : '';
-  const deleteForm = !isNew && canDelete
-    ? `<form method="post" action="/tasks/${task.id}/delete" data-confirm="Delete this task and its comments?">
-        <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        <button class="btn btn-danger" type="submit">Delete task</button>
-      </form>`
+  const pageActions = !isNew
+    ? `<div class="title-actions">${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? completeControl(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`
     : '';
   const commentBlock = isNew
     ? ''
@@ -538,10 +546,9 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     crumb: `<a href="/">Tasks</a> <span class="sep">›</span> <span class="crumb-current">${esc(title)}</span>`,
     body: `
       <section class="panel pad">
-        <div class="title-row"><h1>${esc(title)}</h1>${!isNew && canComplete ? completeControl(task, user, csrf, `/tasks/${task.id}`, true) : ''}${!isNew && task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>
+        <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
         ${meta}
         ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit, currentUser: user, today })}
-        ${deleteForm}
       </section>
       ${renderTimer(task, csrf, timer)}
       ${isNew ? '' : `<section class="panel pad">
@@ -572,7 +579,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
   });
 }
 
-export function renderUsers({ user, csrf, msg, users }) {
+export function renderUsers({ user, csrf, msg, users, removed = null }) {
   const superuser = user.role === 'superuser';
   const createRole = superuser
     ? `<label class="field"><span>Role</span><select name="role">${options(ROLES, 'user')}</select></label>`
@@ -616,7 +623,18 @@ export function renderUsers({ user, csrf, msg, users }) {
         <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Password</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="6">No users to show.</td></tr>'}</tbody>
       </table>
-    </div>`;
+    </div>
+    ${removed ? `<section class="panel pad">
+      <h2>Removed</h2>
+      ${removed.length ? `<table class="grid"><thead><tr><th>Task</th><th>Created by</th><th>Removed</th><th></th></tr></thead><tbody>
+        ${removed.map((task) => `<tr>
+          <td>${esc(task.title)}</td>
+          <td>${esc(task.creator_name || '—')}</td>
+          <td>${esc(formatDateTime(task.deleted_at))}</td>
+          <td><form method="post" action="/tasks/${task.id}/restore"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn" type="submit">Restore</button></form></td>
+        </tr>`).join('')}
+      </tbody></table>` : '<p class="hint">No removed tasks.</p>'}
+    </section>` : ''}`;
 
   return layout({
     title: 'Users · Sunspec',

@@ -144,6 +144,10 @@ function migrate(db) {
   if (!taskColumns.some((column) => column.name === 'project_id')) {
     db.exec('ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id)');
   }
+  const columns = db.prepare('PRAGMA table_info(tasks)').all();
+  if (!columns.some((column) => column.name === 'deleted_at')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN deleted_at TEXT');
+  }
 }
 
 export function userCount(db) {
@@ -285,7 +289,7 @@ function likeTerm(value) {
 }
 
 export function listTasks(db, filters) {
-  const where = [];
+  const where = ['t.deleted_at IS NULL'];
   const params = [];
   if (filters.status) {
     where.push('t.status = ?');
@@ -349,10 +353,10 @@ export function listTasks(db, filters) {
 }
 
 export function boardCounts(db, today) {
-  const open = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE status != 'done'").get().n;
+  const open = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE status != 'done' AND deleted_at IS NULL").get().n;
   const overdue = db.prepare(`
     SELECT COUNT(*) AS n FROM tasks
-    WHERE status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ?
+    WHERE status != 'done' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date != '' AND due_date < ?
   `).get(today).n;
   return { open, overdue };
 }
@@ -368,7 +372,7 @@ export function getTask(db, id) {
     LEFT JOIN users a ON a.id = t.assignee_id
     LEFT JOIN users c ON c.id = t.created_by
     LEFT JOIN projects p ON p.id = t.project_id
-    WHERE t.id = ?
+    WHERE t.id = ? AND t.deleted_at IS NULL
   `).get(id) || null;
 }
 
@@ -424,11 +428,25 @@ export function updateTask(db, id, fields) {
 }
 
 export function deleteTask(db, id) {
-  const tx = db.transaction(() => {
-    db.prepare('DELETE FROM comments WHERE task_id = ?').run(id);
-    db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-  });
-  tx();
+  const now = new Date().toISOString();
+  db.prepare('UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL').run(now, id);
+  db.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, now, id);
+}
+
+export function listRemovedTasks(db) {
+  return db.prepare(`
+    SELECT t.id, t.title, t.status, t.deleted_at, c.name AS creator_name
+    FROM tasks t
+    LEFT JOIN users c ON c.id = t.created_by
+    WHERE t.deleted_at IS NOT NULL
+    ORDER BY t.deleted_at DESC
+  `).all();
+}
+
+export function restoreTask(db, id) {
+  const now = new Date().toISOString();
+  const info = db.prepare('UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL').run(now, id);
+  return info.changes > 0;
 }
 
 export function listComments(db, taskId) {
@@ -544,7 +562,7 @@ export function deleteAttachment(db, id) {
 }
 
 function taskScope(filters, params) {
-  const where = ['1 = 1'];
+  const where = ['t.deleted_at IS NULL'];
   if (filters.projectId) {
     where.push('t.project_id = ?');
     params.push(filters.projectId);
@@ -570,7 +588,7 @@ export function managementReport(db, filters) {
       SUM(CASE WHEN t.id IS NOT NULL AND t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
       SUM(CASE WHEN t.completed_at IS NOT NULL AND t.completed_at >= ? THEN 1 ELSE 0 END) AS done_week
     FROM users u
-    LEFT JOIN tasks t ON t.assignee_id = u.id AND (? IS NULL OR t.project_id = ?)
+    LEFT JOIN tasks t ON t.assignee_id = u.id AND t.deleted_at IS NULL AND (? IS NULL OR t.project_id = ?)
     WHERE u.active = 1 ${personClause}
     GROUP BY u.id
     ORDER BY open_count DESC, u.name COLLATE NOCASE
@@ -632,7 +650,7 @@ export function managementReport(db, filters) {
         SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
         SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_week
       FROM tasks
-      WHERE assignee_id IS NULL ${projectSql}
+      WHERE assignee_id IS NULL AND deleted_at IS NULL ${projectSql}
     `).get(...params);
   }
 
@@ -721,7 +739,7 @@ export function timeTotals(db, now = Date.now()) {
 }
 
 export function timeReport(db, filters, now = Date.now()) {
-  const where = [];
+  const where = ['t.deleted_at IS NULL'];
   const params = [];
   if (filters.projectId) {
     where.push('t.project_id = ?');
@@ -759,7 +777,7 @@ export function timeReport(db, filters, now = Date.now()) {
     byProject.set(projectKey, project);
   }
 
-  const doneWhere = ["t.status = 'done'"];
+  const doneWhere = ["t.status = 'done'", 't.deleted_at IS NULL'];
   const doneParams = [];
   if (filters.projectId) {
     doneWhere.push('t.project_id = ?');
@@ -864,13 +882,13 @@ export function toggleKudo(db, { userId, targetType, targetId }) {
 }
 
 export function myDay(db, userId, today) {
-  const open = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status != 'done'").get(userId).n;
-  const dueToday = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status != 'done' AND due_date = ?").get(userId, today).n;
+  const open = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status != 'done' AND deleted_at IS NULL").get(userId).n;
+  const dueToday = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE assignee_id = ? AND status != 'done' AND deleted_at IS NULL AND due_date = ?").get(userId, today).n;
   const timer = db.prepare(`
     SELECT te.task_id, te.started_at, t.title
     FROM time_entries te
     JOIN tasks t ON t.id = te.task_id
-    WHERE te.user_id = ? AND te.ended_at IS NULL
+    WHERE te.user_id = ? AND te.ended_at IS NULL AND t.deleted_at IS NULL
   `).get(userId) || null;
   return { open, dueToday, timer };
 }
@@ -891,8 +909,13 @@ export function teamBoard(db, now = Date.now()) {
   const weekIso = startOfWeekIso(moment);
   const monthIso = startOfMonthIso(moment);
   const people = db.prepare("SELECT id, name FROM users WHERE active = 1 ORDER BY name COLLATE NOCASE").all();
-  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL").all();
-  const entries = db.prepare('SELECT user_id, started_at, ended_at FROM time_entries').all();
+  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
+  const entries = db.prepare(`
+    SELECT te.user_id, te.started_at, te.ended_at
+    FROM time_entries te
+    JOIN tasks t ON t.id = te.task_id
+    WHERE t.deleted_at IS NULL
+  `).all();
   return people.map((person) => {
     const mine = done.filter((task) => task.assignee_id === person.id || (!task.assignee_id && task.created_by === person.id));
     const completedDates = new Set();

@@ -31,6 +31,7 @@ import {
   loginAttemptCount,
   openDatabase,
   recordLoginAttempt,
+  restoreTask,
   updateTask,
   updateUser,
   userCount,
@@ -44,6 +45,7 @@ import {
   activeUserIds,
   kudosSummary,
   listProjects,
+  listRemovedTasks,
   listRunningTimers,
   listTimeEntries,
   getRunningTimer,
@@ -64,7 +66,7 @@ import {
 } from './db.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
-import { canCompleteTask, canControlTimer, canDeleteComment, canDeleteTask, canEditTask, canEditUser, isStaff } from './permissions.js';
+import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
 import { daysAgoIso, entrySeconds, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
 import {
   renderBoard,
@@ -492,7 +494,7 @@ export function createApp(config) {
       attachments: listAttachments(db, task.id),
       timer: { ...timerView(db, task, req.user.id), canControl: canControlTimer(req.user, task) },
       canEdit: canEditTask(req.user, task),
-      canDelete: canDeleteTask(req.user),
+      canDelete: canRemoveTask(req.user, task),
       canComplete: canCompleteTask(req.user, task),
       commentPerms,
       commentKudos,
@@ -612,12 +614,18 @@ export function createApp(config) {
     const id = numericId(req.params.id);
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
-    if (!canDeleteTask(req.user)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
-    for (const file of listAttachments(db, task.id)) {
-      fs.rmSync(path.join(uploadsDir, path.basename(file.stored_name)), { force: true });
-    }
+    if (!canRemoveTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     deleteTask(db, task.id);
-    res.redirect('/?msg=deleted');
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Removed the task' });
+    res.redirect(safeNext(String(req.body.back || '/?msg=deleted')));
+  });
+
+  app.post('/tasks/:id/restore', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    if (req.user.role !== 'superuser') return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const id = numericId(req.params.id);
+    if (!id || !restoreTask(db, id)) return res.redirect('/users?msg=invalid');
+    res.redirect('/users?msg=saved');
   });
 
   app.post('/tasks/:id/comments', requireUser, (req, res) => {
@@ -652,6 +660,7 @@ export function createApp(config) {
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
       users: listUsers(db, req.user),
+      removed: req.user.role === 'superuser' ? listRemovedTasks(db) : null,
     }));
   });
 
