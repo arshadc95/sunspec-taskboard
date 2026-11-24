@@ -1239,7 +1239,11 @@ export function teamBoard(db, now = Date.now()) {
     const mineOpen = openTasks.filter((task) => (members.get(task.id) || []).includes(person.id));
     const upcoming = mineOpen
       .filter((task) => task.due_date)
-      .sort((a, b) => a.due_date.localeCompare(b.due_date) || a.id - b.id)
+      .sort((a, b) => {
+        const lateA = a.due_date < today ? 0 : 1;
+        const lateB = b.due_date < today ? 0 : 1;
+        return lateA - lateB || a.due_date.localeCompare(b.due_date) || a.id - b.id;
+      })
       .slice(0, 3)
       .map((task) => ({
         id: task.id,
@@ -1261,6 +1265,7 @@ export function teamBoard(db, now = Date.now()) {
       onTimePercent: withDue ? Math.round((onTime / withDue) * 100) : null,
       streak,
       upcoming,
+      more: Math.max(0, mineOpen.length - upcoming.length),
     };
   });
   const maxOpen = rows.reduce((max, row) => Math.max(max, row.open), 0);

@@ -1024,7 +1024,7 @@ function hoursLabel(value) {
 }
 
 function onTimeLabel(value) {
-  if (value == null) return 'None yet';
+  if (value == null) return '—';
   return `${value}%`;
 }
 
@@ -1033,13 +1033,19 @@ function streakLabel(value) {
   return value === 1 ? '1 day' : `${value} days`;
 }
 
-function teamCard(row) {
+function teamTasks(row) {
   const tasks = row.upcoming || [];
-  const list = row.open
-    ? (tasks.length
+  const more = row.more || 0;
+  const body = !row.open
+    ? '<p class="person-empty">No open tasks</p>'
+    : (tasks.length
       ? `<ul class="person-due">${tasks.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <time class="${task.late ? 'late' : ''}">${esc(formatDue(task.due))}</time></li>`).join('')}</ul>`
-      : '<p class="person-empty">No due dates</p>')
-    : '<p class="person-empty">No open tasks</p>';
+      : '<p class="person-empty">No due dates</p>');
+  const extra = more > 0 ? `<a href="/?assignee=${row.id}">+${more} more</a>` : '';
+  return `<div class="person-tasks">${body}<p class="person-more">${extra}</p></div>`;
+}
+
+function teamCard(row) {
   return `<article class="person-card">
     <h2>${nameLine(row.name, row.color, row.id)}${roleBadge(row.role)}</h2>
     <div class="person-nums">
@@ -1049,7 +1055,7 @@ function teamCard(row) {
     </div>
     <p class="person-small"><span>${hoursLabel(row.monthHours)} this month</span><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
     <div class="load-track" title="${row.open} open"><span class="w-${Math.max(0, Math.min(100, Math.round(row.load || 0)))}"></span></div>
-    ${list}
+    ${teamTasks(row)}
   </article>`;
 }
 

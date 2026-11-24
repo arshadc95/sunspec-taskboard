@@ -24,12 +24,12 @@ test('an empty team card does not show a table of zeros', () => {
   assert.match(html, /Ada Lovelace/);
   assert.match(html, /class="swatch c-/);
   assert.match(html, /No open tasks/);
-  assert.match(html, /No hours/);
-  assert.match(html, /None yet/);
+  assert.match(html, /No hours this month/);
+  assert.match(html, /On time —/);
   assert.match(html, /No streak/);
+  assert.doesNotMatch(html, /None yet/);
   assert.match(html, /Admin/);
   assert.doesNotMatch(html, /info-btn/);
-  assert.doesNotMatch(html, /—/);
   assert.doesNotMatch(html, /<table/);
 });
 
@@ -69,6 +69,7 @@ test('a team card lists the next three due tasks and the colour', () => {
   assert.equal(adaRow.open, 5);
   assert.equal(adaRow.overdue, 1);
   assert.equal(adaRow.upcoming.length, 3);
+  assert.equal(adaRow.more, 2);
   assert.equal(adaRow.load, 100);
   assert.match(html, /swatch c-/);
   assert.match(html, /Open<\/span><strong>5<\/strong>/);
@@ -81,6 +82,42 @@ test('a team card lists the next three due tasks and the colour', () => {
   assert.match(html, /Soon visit/);
   assert.match(html, /Later cable/);
   assert.doesNotMatch(html, /Fourth job/);
+  assert.match(html, new RegExp(`href="/\\?assignee=${ada.id}">\\+2 more`));
   assert.doesNotMatch(html, /No open tasks/);
   assert.doesNotMatch(html, /info-btn/);
+});
+
+test('a card with many tasks shows three rows and a link for the rest', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-team-many-'));
+  const db = openDatabase(path.join(dir, 'board.sqlite'));
+  const ada = createUser(db, { email: 'ada@example.com', name: 'Ada Lovelace', password: 'password1', role: 'admin' });
+  const today = todayDate();
+  for (let index = 0; index < 20; index += 1) {
+    createTask(db, {
+      title: `Job ${String(index).padStart(2, '0')}`,
+      description: '',
+      assigneeId: ada.id,
+      assigneeIds: [ada.id],
+      status: 'todo',
+      priority: null,
+      dueDate: shiftDate(today, index - 5),
+      projectId: null,
+      createdBy: ada.id,
+    });
+  }
+  const rows = teamBoard(db);
+  const html = page(rows);
+  db.close();
+  const adaRow = rows.find((row) => row.name === 'Ada Lovelace');
+  assert.equal(adaRow.open, 20);
+  assert.equal(adaRow.upcoming.length, 3);
+  assert.deepEqual(adaRow.upcoming.map((task) => task.title), ['Job 00', 'Job 01', 'Job 02']);
+  assert.equal(adaRow.upcoming.every((task, index) => index === 0 || task.due >= adaRow.upcoming[index - 1].due), true);
+  assert.equal(adaRow.upcoming[0].late, true);
+  assert.equal(adaRow.more, 17);
+  assert.equal((html.match(/<li>/g) || []).length, 3);
+  assert.match(html, /Job 00/);
+  assert.match(html, /Job 02/);
+  assert.doesNotMatch(html, /Job 03/);
+  assert.match(html, new RegExp(`href="/\\?assignee=${ada.id}">\\+17 more`));
 });
