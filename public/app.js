@@ -68,27 +68,6 @@ if (standardRoot && standardList.length) {
   });
 }
 
-function formatElapsed(startedAt) {
-  const start = Date.parse(startedAt);
-  if (!Number.isFinite(start)) return '';
-  const total = Math.max(0, Math.round((Date.now() - start) / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
-function tickTimers() {
-  document.querySelectorAll('[data-started]').forEach((node) => {
-    const output = node.querySelector('.timer-elapsed');
-    if (output) output.textContent = formatElapsed(node.getAttribute('data-started'));
-  });
-}
-tickTimers();
-setInterval(tickTimers, 1000);
-
 document.querySelectorAll('form[data-live]').forEach((form) => {
   const go = () => {
     const params = new URLSearchParams();

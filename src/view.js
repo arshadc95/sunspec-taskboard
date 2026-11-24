@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { daysBetween, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
+import { formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
 
 const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
@@ -348,36 +348,11 @@ function projectScript(projects) {
   return `<script type="application/json" id="project-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
 }
 
-function timerMark(task, user) {
-  const running = task.running || [];
-  if (!running.length) return '';
-  const names = running.map((row) => row.user_name).join(', ');
-  const mine = running.some((row) => row.user_id === user.id);
-  return `<span class="dot${mine ? ' mine' : ''}" title="Timer running: ${esc(names)}">●</span> `;
-}
-
 function assigneeCell(task) {
   const names = (task.assignees || []).map((person) => person.name);
   if (!names.length) return '—';
   if (names.length === 1) return esc(names[0]);
   return `<span title="${esc(names.join(', '))}">${esc(names[0])} +${names.length - 1}</span>`;
-}
-
-function isAssignee(task, user) {
-  return task.assignee_id === user.id;
-}
-
-function rowTimer(task, user, csrf, back) {
-  if (!isAssignee(task, user)) return '';
-  const mine = (task.running || []).find((row) => row.user_id === user.id);
-  const action = mine ? 'stop' : 'start';
-  const label = mine ? 'Stop' : 'Start';
-  return `<form class="row-timer" method="post" action="/tasks/${task.id}/timer/${action}">
-    <input type="hidden" name="_csrf" value="${esc(csrf)}">
-    <input type="hidden" name="return" value="board">
-    <input type="hidden" name="back" value="${esc(back)}">
-    <button class="btn btn-tiny" type="submit">${label}</button>
-  </form>`;
 }
 
 function removeControl(task, user, csrf, back, prominent = false) {
@@ -398,20 +373,12 @@ function completeControl(task, user, csrf, back, prominent = false) {
   </form>`;
 }
 
-function timeCell(task, user, csrf, back) {
-  const mine = (task.running || []).find((row) => row.user_id === user.id);
-  const shown = mine
-    ? `<span class="timer-live" data-started="${esc(mine.started_at)}"><strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></span>`
-    : esc(formatDuration(task.time_seconds || 0));
-  return `<td class="time">${timerMark(task, user)}${shown}${rowTimer(task, user, csrf, back)}</td>`;
+function timeCell(task) {
+  return `<td class="time num">${esc(formatDuration(task.time_seconds || 0))}</td>`;
 }
 
 function taskCard(task, today, user, csrf, back) {
   const overdue = isOverdue(task.due_date, task.status, today);
-  const mine = (task.running || []).find((row) => row.user_id === user.id);
-  const time = mine
-    ? `<span class="timer-live" data-started="${esc(mine.started_at)}"><strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></span>`
-    : esc(formatDuration(task.time_seconds || 0));
   return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
     <div class="card-top"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
@@ -419,7 +386,7 @@ function taskCard(task, today, user, csrf, back) {
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
       <span class="due">${esc(formatDue(task.due_date))}</span>
-      <span class="time">${timerMark(task, user)}${time}${rowTimer(task, user, csrf, back)}</span>
+      <span class="time">${esc(formatDuration(task.time_seconds || 0))}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
     <div class="card-actions">${completeControl(task, user, csrf, back)}</div>
@@ -436,7 +403,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
     <td class="due">${esc(formatDue(task.due_date))}</td>
-    ${timeCell(task, user, csrf, back)}
+    ${timeCell(task)}
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
     <td class="row-actions">${completeControl(task, user, csrf, back)}</td>
@@ -482,7 +449,6 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         <span class="dayline-kicker">My day</span>
         <a href="/?mine=1">${mineDay.open} open</a>
         <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
-        ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
       </div>
       <div class="std" data-standard>
         <span class="std-kicker">Standard</span>
@@ -529,29 +495,6 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
     actions: '<a class="subbar-new" href="/tasks/new" data-open-drawer>+ New task</a>',
     body,
   });
-}
-
-function renderTimer(task, csrf, timer) {
-  if (!task?.id || !timer) return '';
-  const mine = timer.mine;
-  const summary = timer.summary || { total: 0, perUser: [] };
-  const entries = timer.entries || [];
-  const controls = !timer.canControl
-    ? '<p class="hint">Only the assignee can start or stop the timer.</p>'
-    : mine
-    ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
-      <form method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-danger" type="submit">Stop</button></form>`
-    : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
-      ${timer.other ? `<p class="hint">Starting stops your timer on <a href="/tasks/${timer.other.task_id}">${esc(timer.other.task_title)}</a>.</p>` : ''}`;
-  return `<section class="panel pad">
-    <h2>Time</h2>
-    ${controls}
-    <p>Total ${esc(formatDuration(summary.total))}</p>
-    ${summary.perUser.length ? `<table class="grid compact"><thead><tr><th>Person</th><th>Time</th></tr></thead><tbody>
-      ${summary.perUser.map((person) => `<tr><td>${esc(person.user_name)}</td><td>${esc(formatDuration(person.seconds))}</td></tr>`).join('')}
-    </tbody></table>` : '<p class="hint">No time logged yet.</p>'}
-    ${entries.length ? `<h2>Entries</h2><ul class="plain">${entries.map((entry) => `<li>${esc(entry.user_name)} · ${esc(formatDateTime(entry.started_at))} – ${entry.ended_at ? esc(formatDateTime(entry.ended_at)) : 'running'} · ${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}</li>`).join('')}</ul>` : ''}
-  </section>`;
 }
 
 function kudosButton({ csrf, type, id, count = 0, mine = false, back }) {
@@ -623,7 +566,6 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
       <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
       ${meta}
       ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit, currentUser: user, today })}
-      ${renderTimer(task, csrf, timer)}
       ${isNew ? '' : `<section class="panel pad">
         <h2>Files</h2>
         ${attachments.length ? `<ul class="files">${attachments.map((file) => {
@@ -733,12 +675,15 @@ function sortLink(board, key, label) {
   return `<a href="${manageHref(board, { sort: key, dir: next })}">${esc(label)}${mark}</a>`;
 }
 
-function delta(now, prev, higherIsBetter) {
+function delta(now, prev, tone) {
   if (now == null || prev == null) return '';
+  if (!prev) return now ? '<span class="delta flat">new</span>' : '';
   const diff = Math.round((now - prev) * 10) / 10;
-  if (!diff) return '<span class="delta flat">0</span>';
-  const good = higherIsBetter ? diff > 0 : diff < 0;
-  return `<span class="delta ${good ? 'good' : 'bad'}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span>`;
+  if (!diff) return '';
+  let klass = 'flat';
+  if (tone === 'upGood') klass = diff > 0 ? 'good' : 'bad';
+  if (tone === 'upBad') klass = diff > 0 ? 'bad' : 'good';
+  return `<span class="delta ${klass}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span> <span class="delta flat">vs prior</span>`;
 }
 
 export function renderManage({ user, csrf, msg, board, projects }) {
@@ -765,10 +710,10 @@ export function renderManage({ user, csrf, msg, board, projects }) {
           <p class="manager-tip">${esc(board.managerTip)}</p>
         </section>
         <div class="kpi-row">
-          <div class="kpi"><div class="kpi-top"><span>Open</span>${sparkline(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, false)} <span class="delta flat">vs prior</span></div>
-          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${sparkline(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, false)} <span class="delta flat">vs prior</span></div>
-          <div class="kpi"><div class="kpi-top"><span>Done</span>${sparkline(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, true)} <span class="delta flat">vs prior</span></div>
-          <div class="kpi"><div class="kpi-top"><span>Avg cycle time</span>${sparkline(k.sparkCycle, '#f97316')}</div><strong>${avgText}</strong>${delta(k.avg, k.avgPrev, false)} <span class="delta flat">vs prior</span></div>
+          <div class="kpi"><div class="kpi-top"><span>Open</span>${sparkline(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral')}</div>
+          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${sparkline(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad')}</div>
+          <div class="kpi"><div class="kpi-top"><span>Done</span>${sparkline(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood')}</div>
+          <div class="kpi"><div class="kpi-top"><span>Avg cycle time</span>${sparkline(k.sparkCycle, '#f97316')}</div><strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad')}</div>
         </div>
       </div>
     </section>

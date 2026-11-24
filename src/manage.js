@@ -157,10 +157,15 @@ export function buildManage(db, { projectId = null, days = 30, sort = 'name', di
     for (const task of tasks) {
       if (Date.parse(task.created_at) > endMs) continue;
       if (task.deleted_at && Date.parse(task.deleted_at) <= endMs) continue;
+      const rows = hist.get(task.id) || [];
       let status = task.status;
-      for (const row of hist.get(task.id) || []) {
+      for (const row of rows) {
         if (Date.parse(row.changed_at) <= endMs) status = row.status;
         else break;
+      }
+      if (status === 'done' && task.completed_at && Date.parse(task.completed_at) > endMs) {
+        const earlier = [...rows].reverse().find((row) => row.status !== 'done' && Date.parse(row.changed_at) <= endMs);
+        status = earlier ? earlier.status : 'todo';
       }
       if (counts[status] != null) counts[status] += 1;
     }

@@ -102,7 +102,7 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.match(board.text, /data-live/);
     assert.match(board.text, /My day/);
     assert.doesNotMatch(board.text, />Apply</);
-    assert.match(board.text, /timer\/start/);
+    assert.doesNotMatch(board.text, /timer\/start/);
     const stranger = await post(base, admin, `/tasks/${taskId}/timer/start`, { _csrf: users.csrf });
     assert.equal(stranger.status, 403);
     const started = await post(base, thabang, `/tasks/${taskId}/timer/start`, { _csrf: opened.csrf, return: 'board', back: '/' });

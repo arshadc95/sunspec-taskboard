@@ -155,10 +155,10 @@ test('task timers', { timeout: 60000 }, async () => {
     assert.equal(db.prepare('SELECT status FROM tasks WHERE id = ?').get(firstId).status, 'in_progress');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM time_entries WHERE user_id = (SELECT id FROM users WHERE email = ?) AND ended_at IS NULL').get('lindi@example.com').n, 1);
     const detail = await page(base, lindi.cookies, `/tasks/${firstId}`);
-    assert.match(detail.text, /Running since/);
-    assert.match(detail.text, />Stop</);
+    assert.doesNotMatch(detail.text, /timer-elapsed/);
+    assert.doesNotMatch(detail.text, /timer\/stop/);
     const runningBoard = await page(base, lindi.cookies, '/');
-    assert.match(runningBoard.text, /class="dot mine"/);
+    assert.doesNotMatch(runningBoard.text, /timer\/start/);
 
     const switched = await post(base, lindi.cookies, `/tasks/${secondId}/timer/start`, { _csrf: form.csrf });
     assert.equal(switched.status, 302);

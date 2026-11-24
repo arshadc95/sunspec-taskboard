@@ -52,56 +52,106 @@ export function throughputChart(rows) {
   return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Tasks created and completed over 12 weeks">${axis}${bars}</svg>`;
 }
 
+const FLOW = [
+  ['todo', 'To do', '#e5e5e5'],
+  ['in_progress', 'In progress', '#f97316'],
+  ['review', 'Review', '#fdba74'],
+  ['done', 'Done', '#111'],
+];
+
 export function stackedArea(cfd) {
   const days = cfd?.days || [];
   if (!days.length) return '';
-  const keys = ['todo', 'in_progress', 'review', 'done'];
-  const colors = { todo: '#d4d4d4', in_progress: '#f97316', review: '#93c5fd', done: '#111' };
-  const totals = days.map((_, index) => keys.reduce((sum, key) => sum + (cfd[key][index] || 0), 0));
+  const totals = days.map((_, index) => FLOW.reduce((sum, [key]) => sum + (cfd[key][index] || 0), 0));
   if (!totals.some((value) => value > 0)) return '';
   const w = 640;
-  const h = 160;
+  const h = 200;
+  const left = 32;
+  const top = 22;
+  const bottom = 28;
+  const plotH = h - top - bottom;
   const max = Math.max(...totals, 1);
-  const xAt = (index) => (days.length === 1 ? w / 2 : (index / (days.length - 1)) * (w - 8) + 4);
-  const yAt = (value) => h - 16 - (value / max) * (h - 28);
+  const xAt = (index) => (days.length === 1 ? left + (w - left - 12) / 2 : left + (index / (days.length - 1)) * (w - left - 12));
+  const yAt = (value) => top + plotH - (value / max) * plotH;
   let shapes = '';
-  for (let layer = keys.length - 1; layer >= 0; layer -= 1) {
-    const top = [];
-    const bottom = [];
+  for (let layer = FLOW.length - 1; layer >= 0; layer -= 1) {
+    const key = FLOW[layer][0];
+    const topPts = [];
+    const bottomPts = [];
     days.forEach((_, index) => {
-      const below = keys.slice(0, layer).reduce((sum, key) => sum + (cfd[key][index] || 0), 0);
-      const here = below + (cfd[keys[layer]][index] || 0);
-      top.push(`${xAt(index).toFixed(1)},${yAt(here).toFixed(1)}`);
-      bottom.push(`${xAt(index).toFixed(1)},${yAt(below).toFixed(1)}`);
+      const below = FLOW.slice(0, layer).reduce((sum, [name]) => sum + (cfd[name][index] || 0), 0);
+      const here = below + (cfd[key][index] || 0);
+      topPts.push(`${xAt(index).toFixed(1)},${yAt(here).toFixed(1)}`);
+      bottomPts.push(`${xAt(index).toFixed(1)},${yAt(below).toFixed(1)}`);
     });
-    const points = [...top, ...bottom.reverse()].join(' ');
-    shapes += `<polygon points="${points}" fill="${colors[keys[layer]]}" opacity="0.9"/>`;
+    shapes += `<polygon points="${[...topPts, ...bottomPts.reverse()].join(' ')}" fill="${FLOW[layer][2]}"><title>${FLOW[layer][1]}</title></polygon>`;
   }
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Tasks in each status over the period">${shapes}</svg>`;
+  const probes = days.map((day, index) => {
+    const bits = FLOW.map(([key, label]) => `${label} ${cfd[key][index] || 0}`).join(', ');
+    const slot = days.length === 1 ? 12 : Math.max(4, (w - left - 12) / (days.length - 1));
+    return `<rect x="${(xAt(index) - slot / 2).toFixed(1)}" y="${top}" width="${slot.toFixed(1)}" height="${plotH}" fill="transparent"><title>${esc(day)}: ${bits}</title></rect>`;
+  }).join('');
+  const legend = FLOW.map(([, label, color], index) => {
+    const x = left + index * 110;
+    return `<rect x="${x}" y="4" width="8" height="8" fill="${color}"/><text x="${x + 12}" y="12" font-size="10" fill="#111" font-family="Inter, sans-serif">${label}</text>`;
+  }).join('');
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${top + plotH}" x2="${w - 12}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<text x="2" y="${top + 8}" font-size="9" fill="#555" font-family="Inter, sans-serif">${max}</text>`
+    + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`
+    + `<text x="${left}" y="${h - 6}" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(days[0])}</text>`
+    + `<text x="${w - 12}" y="${h - 6}" text-anchor="end" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(days[days.length - 1])}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cumulative flow by status">${legend}${axis}${shapes}${probes}</svg>`;
 }
 
 export function scatterChart(points, p85) {
   if (!points?.length) return '';
   const w = 640;
-  const h = 160;
-  const maxY = Math.max(p85 || 0, ...points.map((point) => point.days), 1);
-  const xs = points.map((point) => point.date).sort();
-  const minX = xs[0];
-  const maxX = xs[xs.length - 1];
-  const span = Math.max(1, Date.parse(`${maxX}T12:00:00Z`) - Date.parse(`${minX}T12:00:00Z`));
-  const dots = points.map((point) => {
-    const x = 8 + ((Date.parse(`${point.date}T12:00:00Z`) - Date.parse(`${minX}T12:00:00Z`)) / span) * (w - 16);
-    const y = h - 16 - (point.days / maxY) * (h - 28);
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="#111"><title>${esc(point.title)} ${point.days}d</title></circle>`;
-  }).join('');
-  const lineY = p85 == null ? null : h - 16 - (p85 / maxY) * (h - 28);
-  const line = lineY == null ? '' : `<line x1="8" x2="${w - 8}" y1="${lineY.toFixed(1)}" y2="${lineY.toFixed(1)}" stroke="#f97316" stroke-width="1.5"/>`;
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cycle time of finished tasks">${line}${dots}</svg>`;
+  const h = 190;
+  const left = 36;
+  const top = 16;
+  const bottom = 28;
+  const plotH = h - top - bottom;
+  const plotW = w - left - 16;
+  const maxY = Math.max(1, p85 || 0, ...points.map((point) => point.days)) * 1.15;
+  const dates = points.map((point) => Date.parse(`${point.date}T12:00:00Z`)).filter(Number.isFinite);
+  const minX = Math.min(...dates);
+  const maxX = Math.max(...dates);
+  const span = Math.max(86400000, maxX - minX);
+  const xAt = (date) => left + ((Date.parse(`${date}T12:00:00Z`) - minX) / span) * plotW;
+  const yAt = (days) => top + plotH - (days / maxY) * plotH;
+  const dots = points.map((point) => `<circle cx="${xAt(point.date).toFixed(1)}" cy="${yAt(point.days).toFixed(1)}" r="4" fill="#111"><title>${esc(point.title)} · ${point.days} days · ${esc(point.date)}</title></circle>`).join('');
+  const line = p85 == null ? '' : `<line x1="${left}" x2="${left + plotW}" y1="${yAt(p85).toFixed(1)}" y2="${yAt(p85).toFixed(1)}" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5 4"/><text x="${left + plotW}" y="${Math.max(12, yAt(p85) - 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#f97316" font-family="Inter, sans-serif">85th · ${p85}d</text>`;
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${top + plotH}" x2="${left + plotW}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<text x="2" y="${top + 8}" font-size="9" fill="#555" font-family="Inter, sans-serif">${Math.ceil(maxY)}</text>`
+    + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`
+    + `<text x="${left}" y="${h - 6}" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(points[0].date.slice(5))}</text>`
+    + `<text x="${left + plotW}" y="${h - 6}" text-anchor="end" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(points[points.length - 1].date.slice(5))}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cycle time of finished tasks">${axis}${line}${dots}</svg>`;
 }
 
 export function backlogChart(points) {
   if (!points?.length) return '';
-  return sparkline(points.map((point) => point.open), '#111').replace('class="spark"', 'class="chart backlog"').replace('width="96"', 'width="100%"').replace('height="28"', 'height="48"');
+  const w = 640;
+  const h = 160;
+  const left = 32;
+  const top = 12;
+  const bottom = 22;
+  const plotH = h - top - bottom;
+  const plotW = w - left - 12;
+  const values = points.map((point) => point.open);
+  const max = Math.max(...values, 1);
+  const xAt = (index) => (points.length === 1 ? left + plotW / 2 : left + (index / (points.length - 1)) * plotW);
+  const yAt = (value) => top + plotH - (value / max) * plotH;
+  const line = values.map((value, index) => `${xAt(index).toFixed(1)},${yAt(value).toFixed(1)}`).join(' ');
+  const area = `${left},${top + plotH} ${line} ${xAt(points.length - 1).toFixed(1)},${top + plotH}`;
+  const probes = values.map((value, index) => `<circle cx="${xAt(index).toFixed(1)}" cy="${yAt(value).toFixed(1)}" r="6" fill="transparent"><title>Open ${value}</title></circle>`).join('');
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${top + plotH}" x2="${left + plotW}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<text x="2" y="${top + 8}" font-size="9" fill="#555" font-family="Inter, sans-serif">${max}</text>`
+    + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Open tasks over the period">${axis}<polygon points="${area}" fill="#f97316" opacity="0.15"/><polyline fill="none" stroke="#111" stroke-width="2" points="${line}"/>${probes}</svg>`;
 }
 
 export function heatMap(heatmap) {
