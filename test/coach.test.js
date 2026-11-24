@@ -33,7 +33,7 @@ test('coach stays constructive and waits for enough data', () => {
   assert.match(text, /Review is getting a bit full/);
   assert.equal(tips.some((item) => item.id === 'throughput'), false);
   assert.equal(tips.some((item) => item.id === 'overdue-trend'), false);
-  assert.doesNotMatch(text, /worst|rank|underperform/i);
+  assert.doesNotMatch(text, /worst|rank|underperform|\bWIP\b|throughput/i);
 });
 
 test('coach can say something kind when the week went well', () => {

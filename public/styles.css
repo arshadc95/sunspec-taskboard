@@ -768,6 +768,8 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .manage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space); align-items: stretch; }
 .manage-grid > .sheet { height: 100%; display: flex; flex-direction: column; }
 .manage-block > h2 { margin: 0; padding: 10px 16px; background: #000; color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.card-sub { margin: 0; padding: 8px 16px 0; color: #666; font-size: 12px; font-weight: 500; line-height: 1.35; letter-spacing: 0; text-transform: none; }
+.coach .card-sub { padding: 8px 12px 0; }
 .manage-block > .table-wrap,
 .manage-block > .plain,
 .manage-block > .chart-pad,

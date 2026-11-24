@@ -1,8 +1,8 @@
 const TIPS = [
   'Cap what is in progress. Two or three live jobs beats a long in-progress list.',
   'A due date is a promise to the week. Set it on purpose, or leave it blank on purpose.',
-  'Once a week, look at what has gone quiet. Old in-progress work is where flow dies.',
-  'Finish before you start. More work in progress means a longer wait for each job.',
+  'Once a week, look at what has gone quiet. Old in-progress work is where things stall.',
+  'Finish before you start. More tasks in progress means a longer wait for each one.',
   'If review is piling up, pause new starts until a couple clear.',
   'Unassigned work is easy to forget. Put a name on it.',
   'A ten-minute check-in beats another status meeting.',
@@ -12,12 +12,12 @@ const TIPS = [
   'If a task has not moved in a week, ask what is blocking it.',
   'A short Monday look at overdue items saves a messy Friday.',
   'Do not start a new task for someone already sitting on a pile.',
-  'The slow tail matters more than the average. That is the job that hurts.',
+  'The slow tasks matter more than the average. That is the one that hurts.',
   'Clear review before you pull more into progress.',
-  'Same person on too many jobs means context switching, not speed.',
+  'The same person on too many tasks is switching around, not getting faster.',
   'Write the next step on the task so a check-in is easy.',
   'Compare this period with the last one before you change the plan.',
-  'Spare capacity is useful. Offer it before people drown.',
+  'If someone has room, offer them a task before the others get buried.',
   'Name the safe state. If the PLC stops, the plant should fail quietly, not wildly.',
 ];
 

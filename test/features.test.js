@@ -149,7 +149,11 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(manage.text, /Lindi Nkosi/);
     assert.match(manage.text, /Tubecon logger/);
     assert.match(manage.text, /Needs attention/);
-    assert.match(manage.text, /Coach/);
+    assert.match(manage.text, /Tips/);
+    assert.match(manage.text, /Created vs done/);
+    assert.match(manage.text, /Avg days to finish/);
+    assert.match(manage.text, /If created stays above done/);
+    assert.doesNotMatch(manage.text, /info-btn/);
     assert.doesNotMatch(manageDenied.text, /href="\/manage"/);
     const again = await page(base, admin.cookies, '/users');
     await post(base, admin.cookies, '/users', { _csrf: again.csrf, name: 'Thabo Admin', email: 'thabo-admin@example.com', password: 'thabo-password', role: 'admin' });

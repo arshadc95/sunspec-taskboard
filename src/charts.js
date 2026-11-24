@@ -49,7 +49,7 @@ export function throughputChart(rows) {
     + `<text x="2" y="${18 + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`
     + `<rect x="${left}" y="2" width="8" height="8" fill="#d4d4d4"/><text x="${left + 12}" y="10" font-size="10" fill="#111" font-family="Inter, sans-serif">Created</text>`
     + `<rect x="${left + 78}" y="2" width="8" height="8" fill="#f97316"/><text x="${left + 90}" y="10" font-size="10" fill="#111" font-family="Inter, sans-serif">Done</text>`;
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Tasks created and completed over 12 weeks">${axis}${bars}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Created vs done over 12 weeks">${axis}${bars}</svg>`;
 }
 
 const FLOW = [
@@ -101,7 +101,7 @@ export function stackedArea(cfd) {
     + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`
     + `<text x="${left}" y="${h - 6}" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(days[0])}</text>`
     + `<text x="${w - 12}" y="${h - 6}" text-anchor="end" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(days[days.length - 1])}</text>`;
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cumulative flow by status">${legend}${axis}${shapes}${probes}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Status over time">${legend}${axis}${shapes}${probes}</svg>`;
 }
 
 export function scatterChart(points, p85) {
@@ -121,14 +121,15 @@ export function scatterChart(points, p85) {
   const xAt = (date) => left + ((Date.parse(`${date}T12:00:00Z`) - minX) / span) * plotW;
   const yAt = (days) => top + plotH - (days / maxY) * plotH;
   const dots = points.map((point) => `<circle cx="${xAt(point.date).toFixed(1)}" cy="${yAt(point.days).toFixed(1)}" r="4" fill="#111"><title>${esc(point.title)} · ${point.days} days · ${esc(point.date)}</title></circle>`).join('');
-  const line = p85 == null ? '' : `<line x1="${left}" x2="${left + plotW}" y1="${yAt(p85).toFixed(1)}" y2="${yAt(p85).toFixed(1)}" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5 4"/><text x="${left + plotW}" y="${Math.max(12, yAt(p85) - 4).toFixed(1)}" text-anchor="end" font-size="10" fill="#f97316" font-family="Inter, sans-serif">85th · ${p85}d</text>`;
+  const lineY = p85 == null ? 0 : yAt(p85);
+  const line = p85 == null ? '' : `<line x1="${left}" x2="${left + plotW}" y1="${lineY.toFixed(1)}" y2="${lineY.toFixed(1)}" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5 4"/><text x="${left + 6}" y="${(lineY < 28 ? lineY + 14 : lineY - 6).toFixed(1)}" font-size="11" fill="#f97316" font-family="Inter, sans-serif">Most tasks finished within ${p85} days</text>`;
   const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
     + `<line x1="${left}" y1="${top + plotH}" x2="${left + plotW}" y2="${top + plotH}" stroke="#e5e5e5"/>`
     + `<text x="2" y="${top + 8}" font-size="9" fill="#555" font-family="Inter, sans-serif">${Math.ceil(maxY)}</text>`
     + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`
     + `<text x="${left}" y="${h - 6}" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(points[0].date.slice(5))}</text>`
     + `<text x="${left + plotW}" y="${h - 6}" text-anchor="end" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(points[points.length - 1].date.slice(5))}</text>`;
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Cycle time of finished tasks">${axis}${line}${dots}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Days per finished task">${axis}${line}${dots}</svg>`;
 }
 
 export function backlogChart(points) {
@@ -151,7 +152,7 @@ export function backlogChart(points) {
     + `<line x1="${left}" y1="${top + plotH}" x2="${left + plotW}" y2="${top + plotH}" stroke="#e5e5e5"/>`
     + `<text x="2" y="${top + 8}" font-size="9" fill="#555" font-family="Inter, sans-serif">${max}</text>`
     + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`;
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Open tasks over the period">${axis}<polygon points="${area}" fill="#f97316" opacity="0.15"/><polyline fill="none" stroke="#111" stroke-width="2" points="${line}"/>${probes}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Open tasks over time">${axis}<polygon points="${area}" fill="#f97316" opacity="0.15"/><polyline fill="none" stroke="#111" stroke-width="2" points="${line}"/>${probes}</svg>`;
 }
 
 export function heatMap(heatmap) {

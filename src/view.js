@@ -675,7 +675,7 @@ function sortLink(board, key, label) {
   return `<a href="${manageHref(board, { sort: key, dir: next })}">${esc(label)}${mark}</a>`;
 }
 
-function delta(now, prev, tone) {
+function delta(now, prev, tone, days) {
   if (now == null || prev == null) return '';
   if (!prev) return now ? '<span class="delta flat">new</span>' : '';
   const diff = Math.round((now - prev) * 10) / 10;
@@ -683,7 +683,11 @@ function delta(now, prev, tone) {
   let klass = 'flat';
   if (tone === 'upGood') klass = diff > 0 ? 'good' : 'bad';
   if (tone === 'upBad') klass = diff > 0 ? 'bad' : 'good';
-  return `<span class="delta ${klass}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span> <span class="delta flat">vs prior</span>`;
+  return `<span class="delta ${klass}">${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)}</span> <span class="delta flat">vs last ${days} days</span>`;
+}
+
+function manageCard(title, sub, inner) {
+  return `<section class="sheet manage-block"><h2>${esc(title)}</h2><p class="card-sub">${esc(sub)}</p>${inner}</section>`;
 }
 
 export function renderManage({ user, csrf, msg, board, projects }) {
@@ -705,27 +709,29 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       </header>
       <div class="sheet-body">
         <section class="coach">
-          <h2 class="light-h">Coach</h2>
+          <h2 class="light-h">Tips</h2>
+          <p class="card-sub">Notes from this period, and one general reminder.</p>
           ${board.tips.length ? `<ul class="coach-list">${board.tips.map((item) => `<li class="${item.tone === 'good' ? 'good' : ''}"><a href="${esc(item.href)}">${esc(item.text)}</a></li>`).join('')}</ul>` : '<p class="hint">Nothing to flag on this sample.</p>'}
           <p class="manager-tip">${esc(board.managerTip)}</p>
         </section>
         <div class="kpi-row">
-          <div class="kpi"><div class="kpi-top"><span>Open</span>${sparkline(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral')}</div>
-          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${sparkline(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad')}</div>
-          <div class="kpi"><div class="kpi-top"><span>Done</span>${sparkline(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood')}</div>
-          <div class="kpi"><div class="kpi-top"><span>Avg cycle time</span>${sparkline(k.sparkCycle, '#f97316')}</div><strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad')}</div>
+          <div class="kpi"><div class="kpi-top"><span>Open</span>${sparkline(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral', board.periodDays)}</div>
+          <div class="kpi${k.overdue ? ' hot' : ''}"><div class="kpi-top"><span>Overdue</span>${sparkline(k.sparkOver, '#f97316')}</div><strong>${k.overdue}</strong>${delta(k.overdue, k.overduePrev, 'upBad', board.periodDays)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Done</span>${sparkline(k.sparkDone, '#111')}</div><strong>${k.done}</strong>${delta(k.done, k.donePrev, 'upGood', board.periodDays)}</div>
+          <div class="kpi"><div class="kpi-top"><span>Avg days to finish</span>${sparkline(k.sparkCycle, '#f97316')}</div><strong>${avgText}</strong>${delta(k.avg, k.avgPrev, 'upBad', board.periodDays)}</div>
         </div>
       </div>
     </section>
     <section class="sheet manage-block">
       <h2>People</h2>
+      <p class="card-sub">Assigned work, what was finished, and how long it took.</p>
       <div class="table-wrap"><table class="grid">
         <thead><tr>
           <th>${sortLink(board, 'name', 'Name')}</th>
           <th class="num">${sortLink(board, 'assigned', 'Assigned')}</th>
           <th class="num">${sortLink(board, 'done', 'Done')}</th>
           <th class="num">${sortLink(board, 'ontime', 'On time')}</th>
-          <th class="num">${sortLink(board, 'avg', 'Avg cycle')}</th>
+          <th class="num">${sortLink(board, 'avg', 'Avg days')}</th>
           <th class="num">${sortLink(board, 'overdue', 'Overdue')}</th>
         </tr></thead>
         <tbody>
@@ -741,22 +747,18 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       </table></div>
     </section>
     <div class="manage-grid">
-      <section class="sheet manage-block"><h2>Created and done</h2><div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div></section>
-      <section class="sheet manage-block"><h2>Flow by status</h2><div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div></section>
-      <section class="sheet manage-block"><h2>Cycle time</h2><div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}${board.cycle.p85 == null ? '' : `<p class="hint">Orange line is the 85th percentile, ${board.cycle.p85} days.</p>`}</div></section>
-      <section class="sheet manage-block"><h2>Open work</h2><div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open-work trend yet.</p>'}</div></section>
+      ${manageCard('Created vs done', 'If created stays above done, work is piling up.', `<div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div>`)}
+      ${manageCard('Status over time', 'A wide band means tasks are sitting in that status.', `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
+      ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
+      ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>
-    <section class="sheet manage-block"><h2>Workload</h2><div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div></section>
+    ${manageCard('Workload', 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
     <div class="manage-grid">
-      <section class="sheet manage-block"><h2>Needs attention</h2>
-        ${board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue, stuck in review, or unassigned.</p>'}
-      </section>
-      <section class="sheet manage-block"><h2>By project</h2>
-        <div class="table-wrap"><table class="grid">
+      ${manageCard('Needs attention', 'Late tasks, tasks stuck in review, and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${esc(item.owner)} · ${esc(item.note)}</span></li>`).join('')}</ul>` : '<p class="hint">Nothing overdue, stuck in review, or unassigned.</p>')}
+      ${manageCard('By project', 'Open, overdue, and finished tasks in this period.', `<div class="table-wrap"><table class="grid">
           <thead><tr><th>Project</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Done</th></tr></thead>
           <tbody>${board.projects.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.open}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.done}</td></tr>`).join('') || '<tr><td colspan="4">No project work in this period.</td></tr>'}</tbody>
-        </table></div>
-      </section>
+        </table></div>`)}
     </div>`;
 
   return layout({
