@@ -818,16 +818,16 @@ function kpiSpark(series, color, zeroCounts = false) {
   return sparkline(present.map((value) => value || 0), color);
 }
 
-function flowSubtitle(cfd, bucket) {
+function flowSubtitle(cfd) {
   const names = [
     ['todo', 'To do'],
     ['in_progress', 'In progress'],
     ['review', 'Review'],
     ['done', 'Done'],
   ].filter(([key]) => (cfd?.[key] || []).some((value) => value > 0)).map(([, label]) => label);
-  if (names.length < 2) return 'A wide band means tasks are sitting in that status.';
-  const list = names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
-  return `How many tasks are in ${list} each ${bucket === 'week' ? 'week' : 'day'}. A wide band means tasks are sitting there.`;
+  if (!names.length) return 'Each bar is one day in the selected month, up to today.';
+  const list = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  return `Each bar is one day, up to today. ${list}.`;
 }
 
 export function renderManage({ user, csrf, msg, board, projects }) {
@@ -888,7 +888,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
     </section>
     <div class="manage-grid">
       ${manageCard('Created vs done', 'If created stays above done, work is piling up.', `<div class="chart-pad">${throughputChart(board.throughput) || '<p class="hint">Nothing in the last 12 weeks.</p>'}</div>`)}
-      ${manageCard('Status over time', flowSubtitle(board.cfd, board.bucket), `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
+      ${manageCard('Status over time', flowSubtitle(board.cfd), `<div class="chart-pad">${stackedArea(board.cfd) || '<p class="hint">No status history in this period.</p>'}</div>`)}
       ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
       ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>

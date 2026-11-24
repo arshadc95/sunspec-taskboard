@@ -78,6 +78,25 @@ export function monthSpan(ym, now = new Date()) {
   };
 }
 
+export function taskStatusAt(task, rows, endMs) {
+  const created = Date.parse(task.created_at);
+  if (!Number.isFinite(created) || created > endMs) return null;
+  if (task.deleted_at && Date.parse(task.deleted_at) <= endMs) return null;
+  const completed = task.completed_at ? Date.parse(task.completed_at) : null;
+  if (completed && completed <= endMs) return 'done';
+  const known = (rows || []).filter((row) => {
+    const at = Date.parse(row.changed_at);
+    return Number.isFinite(at) && at <= endMs;
+  });
+  if (!known.length) return 'todo';
+  let status = known[known.length - 1].status;
+  if (status === 'done') {
+    const earlier = [...known].reverse().find((row) => row.status !== 'done');
+    status = earlier ? earlier.status : 'todo';
+  }
+  return status === 'in_progress' || status === 'review' ? status : 'todo';
+}
+
 function onTimeRate(tasks) {
   const withDue = tasks.filter((task) => task.due_date);
   if (!withDue.length) return null;
@@ -214,19 +233,8 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     const endMs = slot.to - 1;
     const counts = { todo: 0, in_progress: 0, review: 0, done: 0 };
     for (const task of tasks) {
-      if (Date.parse(task.created_at) > endMs) continue;
-      if (task.deleted_at && Date.parse(task.deleted_at) <= endMs) continue;
-      const rows = hist.get(task.id) || [];
-      let status = task.status;
-      for (const row of rows) {
-        if (Date.parse(row.changed_at) <= endMs) status = row.status;
-        else break;
-      }
-      if (status === 'done' && task.completed_at && Date.parse(task.completed_at) > endMs) {
-        const earlier = [...rows].reverse().find((row) => row.status !== 'done' && Date.parse(row.changed_at) <= endMs);
-        status = earlier ? earlier.status : 'todo';
-      }
-      if (counts[status] != null) counts[status] += 1;
+      const status = taskStatusAt(task, hist.get(task.id) || [], endMs);
+      if (status && counts[status] != null) counts[status] += 1;
     }
     cfd.days.push(slot.label);
     for (const key of Object.keys(counts)) cfd[key].push(counts[key]);
@@ -251,7 +259,13 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     });
   });
 
-  const backlog = slots.map((slot) => ({ label: slot.label, open: openAt(slot.to).length }));
+  const backlog = slots.map((slot) => ({
+    label: slot.label,
+    open: tasks.filter((task) => {
+      const status = taskStatusAt(task, hist.get(task.id) || [], slot.to - 1);
+      return status && status !== 'done';
+    }).length,
+  }));
 
   const attention = [];
   for (const task of overdueNow.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))) {
