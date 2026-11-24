@@ -133,14 +133,4 @@ A task can belong to a project (type a new name such as Tubecon on the task form
 
 The database is migrated when the process starts. An update is still `git pull`, `npm ci --omit=dev`, and `systemctl restart sunspec-taskboard`. No new settings are required.
 
-## Holiday theme
-
-The Christmas theme is always on. It is only `public/themes/christmas.css`, `public/themes/christmas.js`, and one line in `src/view.js`:
-
-```html
-<script src="/themes/christmas.js" defer></script>
-```
-
-To turn it off, delete `public/themes/` and that line, then restart. Nothing else references it.
-
 Press N to open the new-task drawer. Enter in the add row creates a To Do task. Complete (✓) is available to the assignee, the creator, and admins. Only the assignee can start or stop a timer. Mentions use `@[Name](id)` from the picker so names with spaces stay attached to the person. The Team page shows the week and month leaderboard.

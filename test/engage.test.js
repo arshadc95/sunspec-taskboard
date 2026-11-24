@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -69,10 +69,6 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
   const db = app.locals.db;
   const { server, base } = await listen(app);
   try {
-    const layout = readFileSync(new URL('../src/view.js', import.meta.url), 'utf8');
-    assert.match(layout, /themes\/christmas\.js/);
-    assert.match(readFileSync(new URL('../public/themes/christmas.js', import.meta.url), 'utf8'), /Happy holidays from Sunspec/);
-
     const admin = await login(base, 'arshad@example.com', 'super-password');
     const users = await page(base, admin, '/users');
     await post(base, admin, '/users', {
