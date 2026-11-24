@@ -37,6 +37,13 @@ Chat:
   "recent_context": [
     { "role": "user", "text": "What is due today?", "at": "2026-11-24T12:00:00.000Z" }
   ],
+  "board_snapshot": {
+    "users": [{ "id": 4, "name": "Lindi Nkosi" }],
+    "projects": [{ "id": 2, "name": "Site" }],
+    "tasks": [
+      { "id": 18, "title": "Replace the inverter fan", "status": "in_progress", "assignee_id": 5, "due": "2026-11-25", "priority": "high" }
+    ]
+  },
   "board_url": "https://tasks.sunspec.co.za/"
 }
 ```
@@ -60,11 +67,20 @@ Comment (`thread_id` is omitted; `task` is included):
   "recent_context": [
     { "role": "Lindi Nkosi", "text": "@[Grok](1) can you mark this done?", "at": "2026-11-24T12:00:00.000Z" }
   ],
+  "board_snapshot": {
+    "users": [{ "id": 4, "name": "Lindi Nkosi" }],
+    "projects": [{ "id": 2, "name": "Site" }],
+    "tasks": [
+      { "id": 18, "title": "Replace the inverter fan", "status": "in_progress", "assignee_id": 5, "due": "2026-11-25", "priority": "high" }
+    ]
+  },
   "board_url": "https://tasks.sunspec.co.za/tasks/18"
 }
 ```
 
 `recent_context` is the last 10 messages. Chat roles are `user` or `grok`. Comment roles are the author's name. `files` lists PDFs attached to that message. `thread_id` is the chat. A person can keep several chats; the first message's first 40 characters becomes the title until they rename it.
+
+`board_snapshot` is the same on chat and comment webhooks. `users` is active people (`id`, `name`). `projects` is `id` and `name`. `tasks` is open work only (not Done, not removed): `id`, `title`, `status`, `assignee_id`, `due`, `priority`, at most 100, most recently updated first. Done tasks are left out so the bot can answer from this list without another call.
 
 PDFs are checked by the `%PDF` magic bytes, not the browser's file type. At most 5 files, 15 MB each. They are stored under `DATA_DIR/grok-files` with a random name. The row records `stored_name`, and `message_id` or `comment_id`, so the file can be downloaded and shown on the reply. Those two columns are how the file is found; they are not part of the webhook.
 

@@ -512,7 +512,6 @@ table.users td { min-width: 90px; }
 .grok-badge[hidden] { display: none; }
 .grok-ack { background: #1a1a1a; color: #fff; padding: 8px; }
 .grok-ack-line, .grok-live { margin: 0; }
-.grok-ack time { display: block; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .grok-live:empty { display: none; }
 .grok-live { margin-top: 4px; color: #ddd; font-size: 13px; }
 .grok-dots i {

@@ -287,18 +287,6 @@ if (grokRoot) {
   const soundButton = grokRoot.querySelector('[data-grok-sound]');
   if (localStorage.getItem('grok-sound') === '0') soundButton.setAttribute('aria-pressed', 'false');
 
-  function formatElapsed(since) {
-    const sec = Math.max(0, Math.floor((Date.now() - Number(since)) / 1000));
-    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-  }
-
-  function tickElapsed() {
-    document.querySelectorAll('[data-grok-elapsed]').forEach((node) => {
-      if (node.dataset.since) node.textContent = formatElapsed(node.dataset.since);
-    });
-  }
-  window.setInterval(tickElapsed, 1000);
-
   function renderBadge() {
     const count = unread.size;
     badge.hidden = count === 0;
@@ -359,7 +347,7 @@ if (grokRoot) {
     seeThread(threadId);
   }
 
-  function ackNode(since, live) {
+  function ackNode(live) {
     const box = document.createElement('div');
     box.className = 'grok-ack';
     const line = document.createElement('p');
@@ -370,11 +358,7 @@ if (grokRoot) {
     dots.setAttribute('aria-hidden', 'true');
     dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
     line.append(dots);
-    const time = document.createElement('time');
-    time.dataset.grokElapsed = '';
-    time.dataset.since = String(since);
-    time.textContent = formatElapsed(since);
-    box.append(line, time);
+    box.append(line);
     if (live) {
       const status = document.createElement('p');
       status.className = 'grok-live';
@@ -411,7 +395,7 @@ if (grokRoot) {
     }
     (state.messages || []).forEach((message) => {
       if (message.status === 'pending' && !message.body) {
-        log.append(ackNode(Date.parse(message.created_at) || Date.now(), message.live));
+        log.append(ackNode(message.live));
         (message.files || []).forEach((file) => log.append(fileNode(file)));
         return;
       }
@@ -568,7 +552,7 @@ if (grokRoot) {
       mine.textContent = text;
       log.append(mine);
     }
-    const wait = connected ? ackNode(Date.now(), '') : document.createElement('p');
+    const wait = connected ? ackNode('') : document.createElement('p');
     if (!connected) {
       wait.className = 'grok-note';
       wait.textContent = "Grok isn't connected yet";

@@ -584,6 +584,24 @@ export function listProjects(db) {
   return db.prepare('SELECT id, name FROM projects ORDER BY name COLLATE NOCASE').all();
 }
 
+export function boardSnapshot(db) {
+  return {
+    users: db.prepare(`
+      SELECT id, name FROM users
+      WHERE active = 1 AND is_bot = 0
+      ORDER BY name COLLATE NOCASE
+    `).all(),
+    projects: db.prepare('SELECT id, name FROM projects ORDER BY name COLLATE NOCASE').all(),
+    tasks: db.prepare(`
+      SELECT id, title, status, assignee_id, due_date AS due, priority
+      FROM tasks
+      WHERE deleted_at IS NULL AND status != 'done'
+      ORDER BY updated_at DESC
+      LIMIT 100
+    `).all(),
+  };
+}
+
 export function getProject(db, id) {
   return db.prepare('SELECT id, name FROM projects WHERE id = ?').get(id) || null;
 }

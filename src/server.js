@@ -50,6 +50,7 @@ import {
   listTimeEntries,
   addGrokFile,
   addGrokMessage,
+  boardSnapshot,
   createGrokThread,
   deleteGrokFileRow,
   deleteGrokThread,
@@ -947,6 +948,7 @@ export function createApp(config) {
       thread_id: thread.id,
       files: webhookFiles(rows),
       recent_context: recentContext(history.filter((row) => row.status === 'complete' && row.body)),
+      board_snapshot: boardSnapshot(db),
       board_url: `${req.protocol}://${req.get('host')}/`,
     });
     res.json(grokState(req.user.id, thread.id));
@@ -1013,6 +1015,7 @@ export function createApp(config) {
         due: task.due_date || null,
       },
       files: webhookFiles(files),
+      board_snapshot: boardSnapshot(db),
       recent_context: recentContext(comments.slice(-10).map((comment) => ({
         role: comment.author_name,
         body: comment.body,

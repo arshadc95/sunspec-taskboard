@@ -152,6 +152,10 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     assert.equal(received[0].body.user.name, 'Arshad');
     assert.equal(received[0].body.text, 'What is due today?');
     assert.equal(received[0].body.recent_context.at(-1).text, 'What is due today?');
+    assert.equal(received[0].body.board_snapshot.users.some((user) => user.name === 'Arshad' && user.id), true);
+    assert.equal(received[0].body.board_snapshot.users.some((user) => user.name === 'Grok'), false);
+    assert.ok(Array.isArray(received[0].body.board_snapshot.projects));
+    assert.ok(Array.isArray(received[0].body.board_snapshot.tasks));
 
     const arshadId = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
     const status = await fetch(`${base}/api/bot/chat/${chat.thread_id}/status`, {
@@ -210,6 +214,12 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
     assert.equal(hits[1].body.task.title, 'Replace the inverter fan');
     assert.equal(hits[1].body.user.name, 'Lindi Nkosi');
     assert.equal(hits[1].body.thread_id, undefined);
+    const snapTask = hits[1].body.board_snapshot.tasks.find((task) => task.id === taskId);
+    assert.equal(snapTask.title, 'Replace the inverter fan');
+    assert.equal(snapTask.status, 'todo');
+    assert.equal(Object.hasOwn(snapTask, 'assignee_id'), true);
+    assert.equal(Object.hasOwn(snapTask, 'due'), true);
+    assert.equal(Object.hasOwn(snapTask, 'priority'), true);
     const taskStatus = await fetch(`${base}/api/bot/tasks/${taskId}/status`, {
       method: 'POST',
       headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },

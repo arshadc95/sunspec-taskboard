@@ -571,9 +571,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
           </article>
         `).join('') : '<p class="hint">No comments yet.</p>'}
         ${fileLinks(grokFiles)}
-        ${grokWait ? `<div class="grok-ack" data-grok-task="${task.id}" data-since="${Date.parse(grokWait.since) || ''}">
+        ${grokWait ? `<div class="grok-ack" data-grok-task="${task.id}">
           <p class="grok-ack-line">Got it, working on it<span class="grok-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
-          <time data-grok-elapsed data-since="${Date.parse(grokWait.since) || ''}"></time>
           <p class="grok-live" data-grok-live>${esc(grokWait.live || '')}</p>
         </div>` : ''}
         <form class="stack" method="post" action="/tasks/${task.id}/comments" enctype="multipart/form-data">
