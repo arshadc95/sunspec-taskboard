@@ -110,6 +110,10 @@ function navLink(href, icon, label, active, badge = 0) {
   return `<a class="nav-link${active === icon ? ' active' : ''}" href="${href}" title="${esc(label)}" aria-label="${esc(label)}">${ICONS[icon]}${count}<span class="nav-label">${esc(label)}</span></a>`;
 }
 
+function sheet(title, inner, flush = false) {
+  return `<section class="sheet"><header class="sheet-title"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${esc(title)}</span></header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
+}
+
 function peopleScript(users) {
   const data = (users || []).filter((user) => user.active !== 0).map((user) => ({ id: user.id, name: user.name }));
   return `<script type="application/json" id="people-data">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
@@ -142,9 +146,13 @@ function grokWidget(user, csrf) {
       <div class="grok-log" data-grok-log></div>
       <form class="grok-form" data-grok-form>
         <div class="grok-picked" data-grok-picked></div>
+        <p class="grok-pdf-note" data-grok-pdf-note hidden>Grok can read attached PDFs (max 5 × 15 MB, deleted after 24 h).</p>
         <div class="grok-compose">
-          <label class="grok-attach">PDF<input type="file" accept="application/pdf,.pdf" multiple hidden></label>
           <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
+          <button type="button" class="grok-attach" data-grok-attach aria-label="Attach PDF">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <input type="file" accept="application/pdf,.pdf" multiple hidden>
           <button type="submit">Send</button>
         </div>
       </form>
@@ -173,7 +181,8 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
 <header class="topbar">
   <button type="button" class="icon-btn hamburger" data-nav-toggle aria-label="Open menu">${ICONS.menu}</button>
   <a class="brand" href="/"><img src="/sunspec-logo.png" alt="Sunspec Solar"></a>
-  <div class="top-spacer"></div>
+  <div class="crumb">${crumb}</div>
+  <div class="top-actions">${actions}</div>
   <div class="who">
     <span class="who-name">${esc(user.name)}</span>
     ${roleBadge(user.role)}
@@ -196,10 +205,6 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
     </form>
   </aside>
   <div class="main">
-    <div class="subbar">
-      <div class="crumb">${crumb}</div>
-      <div class="subbar-actions">${actions}</div>
-    </div>
     <div class="content">
       ${banner(msg)}
       ${toastBox(toast, csrf)}
@@ -259,51 +264,72 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
   const projectName = value.project_name || '';
   const due = value.due_date || '';
   const day = today || '';
+  const status = value.status || 'todo';
   const chips = day
     ? [['today', 'Today', day], ['tomorrow', 'Tomorrow', shiftDate(day, 1)], ['week', 'Next week', shiftDate(day, 7)], ['none', 'None', '']]
     : [];
   const off = canEdit ? '' : 'disabled';
+  const segments = (items, current, attr) => items.map(([key, label]) => {
+    const on = String(current ?? '') === String(key);
+    return `<button type="button" class="seg pri-${esc(key || 'none')}${on ? ' on' : ''}" ${attr}="${esc(key)}" ${off}>${esc(label)}</button>`;
+  }).join('');
   const fields = `
     <input type="hidden" name="_csrf" value="${esc(csrf)}">
     ${from ? `<input type="hidden" name="from" value="${esc(from)}">` : ''}
-    <label class="field"><span>Title</span>
-      <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit ? 'autofocus' : ''}>
-    </label>
-    <label class="field"><span>Description</span>
-      <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
-      ${value.description ? `<div class="desc-preview">${highlightMentions(value.description, users)}</div>` : ''}
-    </label>
-    <div class="form-grid">
-      <label class="field"><span>Project</span>
-        <span class="combo">
-          <input name="project_name" value="${esc(projectName)}" placeholder="Search or create project" autocomplete="off" data-project-input ${off}>
-          <input type="hidden" name="project_id" value="${esc(value.project_id || '')}" data-project-id>
-        </span>
-      </label>
-      <label class="field"><span>Assignee</span>
-        <span class="combo">
-          <input value="${esc(value.assignee_name || '')}" placeholder="Search people" autocomplete="off" data-user-input ${off}>
-          <input type="hidden" name="assignee_id" value="${esc(value.assignee_id || '')}" data-user-id>
-          ${canEdit && currentUser ? `<button class="btn btn-tiny" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}
-        </span>
-      </label>
-      <label class="field"><span>Status</span>
-        <select name="status" ${off}>${options(STATUSES, value.status || 'todo')}</select>
-      </label>
-      <div class="field"><span>Priority</span>
-        <input type="hidden" name="priority" value="${esc(value.priority || '')}" data-priority-input>
-        <div class="segments">${[['','None'], ...PRIORITIES].map(([key, label]) => `<button type="button" class="seg pri-${esc(key || 'none')}${String(value.priority || '') === key ? ' on' : ''}" data-priority="${esc(key)}" ${off}>${esc(label)}</button>`).join('')}</div>
-      </div>
-      <div class="field"><span>Due date</span>
-        <div class="chips">${chips.map(([key, label, date]) => `<button type="button" class="chip" data-due="${esc(date)}" ${off}>${label}</button>`).join('')}</div>
-        <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
-      </div>
+    <div class="form-sections">
+      <section class="form-card">
+        <h2>Details</h2>
+        <label class="field"><span>Title</span>
+          <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit ? 'autofocus' : ''}>
+        </label>
+        <label class="field"><span>Description</span>
+          <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
+          ${value.description ? `<div class="desc-preview">${highlightMentions(value.description, users)}</div>` : ''}
+        </label>
+      </section>
+      <section class="form-card">
+        <h2>Assignment</h2>
+        <label class="field"><span>Project</span>
+          <span class="combo">
+            <input name="project_name" value="${esc(projectName)}" placeholder="Search or create project" autocomplete="off" data-project-input ${off}>
+            <input type="hidden" name="project_id" value="${esc(value.project_id || '')}" data-project-id>
+          </span>
+        </label>
+        <div class="field">
+          <div class="label-row"><span>Assignee</span>${canEdit && currentUser ? `<button class="assign-link" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}</div>
+          <span class="combo">
+            <input value="${esc(value.assignee_name || '')}" placeholder="Search people" autocomplete="off" data-user-input ${off}>
+            <input type="hidden" name="assignee_id" value="${esc(value.assignee_id || '')}" data-user-id>
+          </span>
+        </div>
+      </section>
+      <section class="form-card">
+        <h2>Status</h2>
+        <div class="field">
+          <input type="hidden" name="status" value="${esc(status)}" data-status-input>
+          <div class="segments">${segments(STATUSES, status, 'data-status')}</div>
+        </div>
+        <h2>Priority</h2>
+        <div class="field">
+          <input type="hidden" name="priority" value="${esc(value.priority || '')}" data-priority-input>
+          <div class="segments">${segments([['', 'None'], ...PRIORITIES], value.priority || '', 'data-priority')}</div>
+        </div>
+      </section>
+      <section class="form-card">
+        <h2>Due date</h2>
+        <div class="field">
+          <div class="due-row">
+            <div class="chips">${chips.map(([, label, date]) => `<button type="button" class="chip${due === date ? ' on' : ''}" data-due="${esc(date)}" ${off}>${label}</button>`).join('')}</div>
+            <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
+          </div>
+        </div>
+      </section>
     </div>
-    ${canEdit ? `<div class="form-actions"><button class="btn btn-primary" type="submit">Save</button>${value.id ? '' : '<button class="btn" type="submit" name="again" value="1">Save & add another</button>'}</div>` : ''}
+    ${canEdit ? `<div class="form-footer"><button class="btn btn-primary" type="submit">Save</button>${value.id ? '' : '<button class="btn btn-line" type="submit" name="again" value="1">Save & add another</button>'}</div>` : ''}
   `;
-  if (!canEdit) return `<div class="stack">${fields}</div>`;
+  if (!canEdit) return `<div class="task-form is-readonly">${fields}</div>`;
   const action = task?.id ? `/tasks/${value.id}` : '/tasks';
-  return `<form class="stack task-form" method="post" action="${action}">${fields}</form>`;
+  return `<form class="task-form" method="post" action="${action}">${fields}</form>`;
 }
 
 function projectScript(projects) {
@@ -444,15 +470,14 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const selectedAssignee = filters.mine ? '' : (filters.assigneeId === 'none' ? 'none' : (filters.assigneeId || ''));
 
   const mineDay = day || { open: 0, dueToday: 0, timer: null };
-  const body = `
-    <section class="myday panel">
-      <strong>My day</strong>
-      <a href="/?mine=1">${mineDay.open} open</a>
-      <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
-      ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
-    </section>
-    <div class="board-tools">
-      <form class="filters" method="get" action="/" data-live>
+  const myDayHtml = [
+    '<div class="myday">',
+    `<a href="/?mine=1">${mineDay.open} open</a>`,
+    `<a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>`,
+    mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>',
+    '</div>',
+  ].join('');
+  const filtersHtml = `<form class="filters" method="get" action="/" data-live>
         <button type="button" class="btn filters-toggle" data-filters-toggle>Filters</button>
         <div class="filters-body">
           <label class="field"><span>Status</span>
@@ -473,8 +498,10 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         </div>
         <a class="btn" data-csv href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
         <a class="btn" href="/">Clear</a>
-      </form>
-    </div>
+      </form>`;
+  const body = `
+    ${sheet('My day', myDayHtml)}
+    ${sheet('Filters', filtersHtml)}
     <form class="quick-form quick-mobile panel" method="post" action="/tasks">
       <input type="hidden" name="_csrf" value="${esc(csrf)}">
       <input type="hidden" name="quick" value="1">
@@ -483,9 +510,9 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
       <button class="btn btn-primary" type="submit">Add</button>
     </form>
     <p class="sort-note">Sorted by due date. Press N for a new task. Overdue tasks are highlighted.</p>
-    ${openGroups.length || doneRows.length ? table : '<div class="panel empty">No tasks match these filters.</div>'}
-    <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
-      <div class="drawer-bar"><h2>New task</h2><button type="button" class="btn" data-close-drawer>Close</button></div>
+    ${openGroups.length || doneRows.length ? sheet('Tasks', table, true) : sheet('Tasks', '<p class="empty">No tasks match these filters.</p>')}
+      <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
+      <div class="drawer-bar"><h2>New task</h2><button type="button" class="drawer-close" data-close-drawer aria-label="Close">×</button></div>
       ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board' })}
     </dialog>
     <a class="fab" href="/tasks/new" data-open-drawer aria-label="New task">+</a>
@@ -575,15 +602,11 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
           <p class="grok-ack-line">Got it, working on it<span class="grok-dots" aria-hidden="true"><i></i><i></i><i></i></span></p>
           <p class="grok-live" data-grok-live>${esc(grokWait.live || '')}</p>
         </div>` : ''}
-        <form class="stack" method="post" action="/tasks/${task.id}/comments" enctype="multipart/form-data">
+        <form class="stack" method="post" action="/tasks/${task.id}/comments">
           <input type="hidden" name="_csrf" value="${esc(csrf)}">
           <label class="field"><span>Add a comment</span>
             <textarea name="body" data-mentions rows="3" required maxlength="8000" placeholder="Add a comment. Type @ to mention someone."></textarea>
           </label>
-          <label class="field"><span>PDF for Grok</span>
-            <input type="file" name="files" accept="application/pdf,.pdf" multiple>
-          </label>
-          <p class="hint">Up to 5 PDFs, 15 MB each. They are sent only when the comment mentions Grok, and they expire after a day.</p>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Comment</button></div>
         </form>
       </section>`;
@@ -598,11 +621,9 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     active: 'tasks',
     crumb: `<a href="/">Tasks</a> <span class="sep">›</span> <span class="crumb-current">${esc(title)}</span>`,
     body: `
-      <section class="panel pad">
-        <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
-        ${meta}
-        ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit, currentUser: user, today })}
-      </section>
+      <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
+      ${meta}
+      ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit, currentUser: user, today })}
       ${renderTimer(task, csrf, timer)}
       ${isNew ? '' : `<section class="panel pad">
         <h2>Files</h2>
@@ -671,12 +692,12 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
         <div class="form-actions"><button class="btn btn-primary" type="submit">Create user</button></div>
       </form>
     </section>
-    <div class="table-wrap panel">
+    ${sheet('People', `<div class="table-wrap">
       <table class="grid users">
         <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Password</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="6">No users to show.</td></tr>'}</tbody>
       </table>
-    </div>
+    </div>`, true)}
     ${removed ? `<section class="panel pad">
       <h2>Removed</h2>
       ${removed.length ? `<table class="grid"><thead><tr><th>Task</th><th>Created by</th><th>Removed</th><th></th></tr></thead><tbody>
@@ -727,7 +748,7 @@ export function renderManage({ user, csrf, msg, report, time, projects, users, f
     : '<p class="hint">None.</p>';
 
   const body = `
-    <form class="filters panel" method="get" action="/manage">
+    ${sheet('Manage', `<form class="filters" method="get" action="/manage">
       <label class="field"><span>Project</span>
         <select name="project">${options((projects || []).map((project) => [String(project.id), project.name]), filters.projectId || '', 'All projects')}</select>
       </label>
@@ -736,7 +757,7 @@ export function renderManage({ user, csrf, msg, report, time, projects, users, f
       </label>
       <button class="btn" type="submit">Apply</button>
       <a class="btn" href="/manage">Clear</a>
-    </form>
+    </form>`)}
     <div class="stats">
       <div class="stat"><span>Open</span><strong>${report.totals.open}</strong></div>
       <div class="stat"><span>Overdue</span><strong>${report.totals.overdue}</strong></div>
@@ -854,7 +875,7 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
   const assigneeOptions = [['', 'All assignees'], ['none', 'Unassigned'], ...users.map((person) => [String(person.id), person.name])];
   const selectedAssignee = filters.mine ? '' : (filters.assigneeId === 'none' ? 'none' : (filters.assigneeId || ''));
   const body = `
-    <div class="cal-nav">
+    ${sheet('Calendar', `<div class="cal-nav">
       <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: prevWeek }) : withKeep({ month: prevMonth })}">Prev</a>
       <strong>${esc(label)}</strong>
       <a class="btn" href="${view === 'week' ? withKeep({ view: 'week', day: nextWeek }) : withKeep({ month: nextMonth })}">Next</a>
@@ -873,12 +894,9 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
         ${view === 'week' ? `<input type="hidden" name="day" value="${esc(anchor)}">` : `<input type="hidden" name="month" value="${year}-${String(month).padStart(2, '0')}">`}
       </div>
       <a class="btn" href="/calendar">Clear</a>
-    </form>
-    ${grid}
-    ${agenda}
-    <section class="panel pad"><h2>No due date</h2>
-      ${undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>'}
-    </section>`;
+    </form>`)}
+    ${sheet(view === 'week' ? 'Week' : 'Month', `${grid}${agenda}`, true)}
+    ${sheet('No due date', undated.length ? `<ul class="plain">${undated.map((task) => `<li><a href="/tasks/${task.id}">${esc(task.title)}</a> <span class="hint">${esc(task.assignee_name || 'Unassigned')}</span></li>`).join('')}</ul>` : '<p class="hint">Every listed task has a due date.</p>')}`;
   return layout({
     title: 'Calendar · Sunspec',
     user,
@@ -893,10 +911,7 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
 
 export function renderTeam({ user, csrf, rows }) {
   const body = `
-    <section class="panel pad">
-      <h1>Team</h1>
-      <p class="hint">Completed work and tracked hours. On time means the completion day in Johannesburg is on or before the due date. A streak is consecutive days with at least one completion, counting back from today.</p>
-    </section>
+    ${sheet('Team', `<p class="hint">Completed work and tracked hours. On time means the completion day in Johannesburg is on or before the due date. A streak is consecutive days with at least one completion, counting back from today.</p>
     <div class="table-wrap">
       <table class="grid">
         <thead><tr><th>Person</th><th>Done this week</th><th>Done this month</th><th>Hours this week</th><th>Hours this month</th><th>On time</th><th>Streak</th></tr></thead>
@@ -912,7 +927,7 @@ export function renderTeam({ user, csrf, rows }) {
           </tr>`).join('') : '<tr><td colspan="7">No active people yet.</td></tr>'}
         </tbody>
       </table>
-    </div>`;
+    </div>`) }`;
   return layout({
     title: 'Team · Sunspec',
     user,

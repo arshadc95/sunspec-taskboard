@@ -431,12 +431,11 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     const task = await post(base, admin, '/tasks', { _csrf: taskForm.csrf, title: 'Fan', status: 'todo' });
     const taskId = Number(task.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
     const taskPage = await page(base, lindi, `/tasks/${taskId}`);
-    const comment = new FormData();
-    comment.set('_csrf', taskPage.csrf);
-    comment.set('body', `@[Grok](${db.prepare("SELECT id FROM users WHERE email = 'grok@taskboard.local'").get().id}) the drawing`);
-    comment.append('files', new Blob([pdf], { type: 'application/pdf' }), 'drawing.pdf');
-    const commented = await fetch(`${base}/tasks/${taskId}/comments`, {
-      method: 'POST', redirect: 'manual', headers: { cookie: lindi.header() }, body: comment,
+    assert.equal(taskPage.text.includes('PDF for Grok'), false);
+    assert.equal(taskPage.text.includes('name="files"'), false);
+    const commented = await post(base, lindi, `/tasks/${taskId}/comments`, {
+      _csrf: taskPage.csrf,
+      body: `@[Grok](${db.prepare("SELECT id FROM users WHERE email = 'grok@taskboard.local'").get().id}) the drawing`,
     });
     assert.equal(commented.status, 302);
     let commentHit;
@@ -446,12 +445,8 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
       if (commentHit) break;
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
-    assert.equal(commentHit.body.files[0].filename, 'drawing.pdf');
-    const shared = await fetch(`${base}/files/${commentHit.body.files[0].id}`, { headers: { cookie: admin.header() } });
-    assert.equal(shared.status, 200);
-    const pageHtml = await page(base, lindi, `/tasks/${taskId}`);
-    assert.match(pageHtml.text, /drawing\.pdf/);
-    assert.match(pageHtml.text, /expires in/);
+    assert.equal(commentHit.body.type, 'comment');
+    assert.deepEqual(commentHit.body.files, []);
 
     db.prepare("UPDATE grok_files SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(fileId);
     const gone = await fetch(`${base}/files/${fileId}`, { headers: { cookie: admin.header() } });

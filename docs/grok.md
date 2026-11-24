@@ -82,7 +82,7 @@ Comment (`thread_id` is omitted; `task` is included):
 
 `board_snapshot` is the same on chat and comment webhooks. `users` is active people (`id`, `name`). `projects` is `id` and `name`. `tasks` is open work only (not Done, not removed): `id`, `title`, `status`, `assignee_id`, `due`, `priority`, at most 100, most recently updated first. Done tasks are left out so the bot can answer from this list without another call.
 
-PDFs are checked by the `%PDF` magic bytes, not the browser's file type. At most 5 files, 15 MB each. They are stored under `DATA_DIR/grok-files` with a random name. The row records `stored_name`, and `message_id` or `comment_id`, so the file can be downloaded and shown on the reply. Those two columns are how the file is found; they are not part of the webhook.
+People attach PDFs in the Grok chat only, with the paperclip button. A comment that mentions `@Grok` is text. The bot can still attach a generated PDF to a chat reply or a task. Files are checked by the `%PDF` magic bytes. At most 5 files, 15 MB each. They are stored under `DATA_DIR/grok-files` with a random name. The row records `stored_name`, and `message_id` or `comment_id`, so the file can be downloaded and shown on the reply. Those two columns are how the file is found; they are not part of the webhook.
 
 Reply to a chat with `POST /api/bot/chat/:thread_id/reply` and the same `request_id`. Reply to a comment with `POST /api/bot/tasks/:id/comments`.
 

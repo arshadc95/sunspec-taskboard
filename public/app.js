@@ -121,29 +121,34 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-document.querySelectorAll('[data-priority]').forEach((button) => {
+document.querySelectorAll('[data-priority], [data-status]').forEach((button) => {
   button.addEventListener('click', () => {
     const wrap = button.parentElement;
-    wrap.querySelectorAll('[data-priority]').forEach((item) => item.classList.remove('on'));
+    const attr = button.hasAttribute('data-status') ? 'data-status' : 'data-priority';
+    const inputName = attr === 'data-status' ? '[data-status-input]' : '[data-priority-input]';
+    wrap.querySelectorAll(`[${attr}]`).forEach((item) => item.classList.remove('on'));
     button.classList.add('on');
-    const input = button.closest('.field')?.querySelector('[data-priority-input]');
-    if (input) input.value = button.getAttribute('data-priority') || '';
+    const input = button.closest('.field')?.querySelector(inputName);
+    if (input) input.value = button.getAttribute(attr) || '';
   });
 });
 
 document.querySelectorAll('[data-due]').forEach((button) => {
   button.addEventListener('click', () => {
-    const input = button.closest('.field')?.querySelector('[data-due-input]');
+    const field = button.closest('.field');
+    const input = field?.querySelector('[data-due-input]');
     if (input) input.value = button.getAttribute('data-due') || '';
+    field?.querySelectorAll('[data-due]').forEach((item) => item.classList.remove('on'));
+    button.classList.add('on');
   });
 });
 
 document.querySelectorAll('[data-assign-me]').forEach((button) => {
   button.addEventListener('click', () => {
-    const combo = button.closest('.combo');
+    const field = button.closest('.field');
     const id = button.getAttribute('data-assign-me');
-    const hidden = combo?.querySelector('[data-user-id]');
-    const text = combo?.querySelector('[data-user-input]');
+    const hidden = field?.querySelector('[data-user-id]');
+    const text = field?.querySelector('[data-user-input]');
     const person = readJson('people-data').find((item) => String(item.id) === String(id));
     if (hidden) hidden.value = id;
     if (text && person) text.value = person.name;
@@ -444,6 +449,7 @@ if (grokRoot) {
     waitingCount = (state.waiting || []).length;
   }
 
+  const pdfNote = grokRoot.querySelector('[data-grok-pdf-note]');
   function showPicked() {
     picked.innerHTML = '';
     chosen.forEach((file, index) => {
@@ -451,11 +457,13 @@ if (grokRoot) {
       chip.textContent = file.name;
       const drop = document.createElement('button');
       drop.type = 'button';
+      drop.setAttribute('aria-label', 'Remove file');
       drop.textContent = '×';
       drop.addEventListener('click', () => { chosen.splice(index, 1); showPicked(); });
       chip.append(drop);
       picked.append(chip);
     });
+    if (pdfNote) pdfNote.hidden = chosen.length === 0;
   }
 
   async function load(id = threadId) {
@@ -532,6 +540,7 @@ if (grokRoot) {
     toggleList(false);
     watch();
   });
+  grokRoot.querySelector('[data-grok-attach]').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
     chosen = chosen.concat([...fileInput.files]).slice(0, 5);
     fileInput.value = '';
