@@ -791,7 +791,7 @@ table.grid td.num { text-align: left; }
 .month-step-btn.is-off { background: #333; color: #777; }
 .month-step-label { color: #fff; font-weight: 700; font-size: 13px; min-width: 9em; text-align: center; }
 .sheet-title .bar-clear { color: #fff; }
-.kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space); align-items: stretch; margin-top: var(--space); }
+.kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space); align-items: stretch; }
 .kpi { background: #fff; border: 1px solid var(--line); border-top: 3px solid #d4d4d4; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .kpi.hot { border-top-color: #f97316; }
 .kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -808,7 +808,6 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .manage-grid > .sheet { height: 100%; display: flex; flex-direction: column; }
 .manage-block > h2 { margin: 0; padding: 10px 16px; background: #000; color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
 .card-sub { margin: 0; padding: 8px 16px 0; color: #666; font-size: 12px; font-weight: 500; line-height: 1.35; letter-spacing: 0; text-transform: none; }
-.coach .card-sub { padding: 8px 12px 0; }
 .manage-block > .table-wrap,
 .manage-block > .plain,
 .manage-block > .chart-pad,
@@ -816,11 +815,6 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .manage-block > .table-wrap { border: 1px solid var(--line); }
 .chart { width: 100%; height: auto; display: block; }
 .chart-pad { padding: 8px 12px 12px; overflow-x: auto; }
-.coach-list { list-style: none; margin: 0; padding: 0; }
-.coach-list li { padding: 6px 0; border-bottom: 1px solid #eee; }
-.coach-list a { text-decoration: none; font-weight: 600; color: #111; }
-.coach-list .good a { color: #15803d; }
-.manager-tip { margin: 8px 0 0; color: #555; }
 .ring { vertical-align: middle; }
 @media (max-width: 900px) {
   .kpi-row { grid-template-columns: 1fr 1fr; }

@@ -156,7 +156,9 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(manage.text, /Lindi Nkosi/);
     assert.match(manage.text, /Tubecon logger/);
     assert.match(manage.text, /Needs attention/);
-    assert.match(manage.text, /Tips/);
+    assert.doesNotMatch(manage.text, />Tips</);
+    assert.doesNotMatch(manage.text, /Worth handing some off|Worth seeing who else|general reminder/);
+    assert.match(manage.text, /class="kpi-row"/);
     assert.match(manage.text, /Created vs done/);
     assert.match(manage.text, /Avg days to finish/);
     assert.match(manage.text, /If created stays above done/);

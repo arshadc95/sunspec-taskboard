@@ -483,7 +483,7 @@ export function createApp(config) {
       user: req.user,
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
-      board: buildManage(db, { ...filters, viewerId: req.user.id }),
+      board: buildManage(db, filters),
       projects: listProjects(db),
     }));
   });
