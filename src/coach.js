@@ -1,151 +1,141 @@
-const TIPS = [
-  'Cap what is in progress. Two or three live jobs beats a long in-progress list.',
-  'A due date is a promise to the week. Set it on purpose, or leave it blank on purpose.',
-  'Once a week, look at what has gone quiet. Old in-progress work is where things stall.',
-  'Finish before you start. More tasks in progress means a longer wait for each one.',
-  'If review is piling up, pause new starts until a couple clear.',
-  'Unassigned work is easy to forget. Put a name on it.',
-  'A ten-minute check-in beats another status meeting.',
-  'On time depends on the date you set, so set one you can actually hit.',
-  'Look at how long jobs take, not only how many got done.',
-  'If one person is holding most of the open work, the whole board slows down.',
-  'If a task has not moved in a week, ask what is blocking it.',
-  'A short Monday look at overdue items saves a messy Friday.',
-  'Do not start a new task for someone already sitting on a pile.',
-  'The slow tasks matter more than the average. That is the one that hurts.',
-  'Clear review before you pull more into progress.',
-  'The same person on too many tasks is switching around, not getting faster.',
-  'Write the next step on the task so a check-in is easy.',
-  'Compare this period with the last one before you change the plan.',
-  'If someone has room, offer them a task before the others get buried.',
-  'Name the safe state. If the PLC stops, the plant should fail quietly, not wildly.',
-];
-
-export function managerTip(now = new Date(), { review = false } = {}) {
-  const pool = review ? TIPS : TIPS.filter((line) => !/review/i.test(line));
-  const start = Date.UTC(now.getUTCFullYear(), 0, 0);
-  const day = Math.floor((now.getTime() - start) / 86400000);
-  return pool[((day % pool.length) + pool.length) % pool.length];
+function firstName(name) {
+  const word = String(name || '').trim().split(/\s+/)[0];
+  return word || 'Someone';
 }
 
-function tip(id, text, href, tone = 'note') {
-  return { id, text, href, tone };
+function joinLabels(labels) {
+  if (labels.length <= 1) return labels[0] || 'Someone';
+  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
+  return `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`;
 }
 
-export function coachTips(facts) {
-  const issues = [];
-  const positives = [];
+function joinNames(people) {
+  const names = [...people]
+    .sort((a, b) => firstName(a.name).localeCompare(firstName(b.name)) || String(a.name).localeCompare(String(b.name)))
+    .map((person) => firstName(person.name));
+  return joinLabels(names);
+}
+
+function tip(id, rank, text, href) {
+  return { id, rank, text, href };
+}
+
+function countLine(count, singular, plural) {
+  return count === 1 ? `1 task ${singular}` : `${count} tasks ${plural}`;
+}
+
+export function coachTips(facts = {}) {
   const people = facts.people || [];
-  const open = facts.open || 0;
-  const enoughHistory = (facts.historyDays || 0) >= 14;
-  const doneSample = (facts.donePeriod || 0) + (facts.donePrevious || 0);
+  const open = Number.isFinite(facts.open) ? facts.open : people.reduce((sum, person) => sum + (person.open || 0), 0);
+  const tips = [];
 
-  const overloaded = people.filter((person) => person.overdue >= 2).sort((a, b) => b.overdue - a.overdue)[0];
-  const spare = people.filter((person) => !overloaded || person.id !== overloaded.id).sort((a, b) => a.open - b.open)[0];
-  if (overloaded && spare && spare.open < overloaded.open) {
-    issues.push(tip(
-      'rebalance',
-      `${overloaded.name} has ${overloaded.overdue} overdue. ${spare.name} has some room if a couple need a home.`,
-      `/?assignee=${overloaded.id}&overdue=1`,
-    ));
+  const busiest = people.reduce((max, person) => Math.max(max, person.open || 0), 0);
+  const heavy = people.filter((person) => (person.open || 0) === busiest && busiest >= 3);
+  const spare = people.filter((person) => (person.open || 0) === 0);
+  if (heavy.length && spare.length && people.length >= 2) {
+    const heavyText = heavy.length === 1
+      ? `${firstName(heavy[0].name)} has ${busiest} open`
+      : `${joinNames(heavy)} have ${busiest} open`;
+    const spareText = spare.length === 1
+      ? `${firstName(spare[0].name)} has 0`
+      : `${joinNames(spare)} have 0`;
+    const shift = spare.length === 1
+      ? `Consider shifting some work to ${firstName(spare[0].name)}.`
+      : 'Consider shifting some work to them.';
+    tips.push(tip('balance', 1, `${heavyText}, ${spareText}. ${shift}`, `/?assignee=${heavy[0].id}`));
   }
 
-  const holders = people.filter((person) => (person.open || 0) > 0);
-  const busiest = [...holders].sort((a, b) => b.open - a.open)[0];
-  if (holders.length >= 2 && busiest && busiest.open >= 4 && open > 0 && busiest.open / open > 0.5) {
-    const mine = facts.viewerId != null && Number(facts.viewerId) === Number(busiest.id);
-    const first = String(busiest.name || '').trim().split(/\s+/)[0] || 'Someone';
-    issues.push(tip(
-      'balance',
-      mine
-        ? "You're holding most of the open work. Worth handing some off."
-        : `Most of the open work is with ${first}.`,
-      `/?assignee=${busiest.id}`,
-    ));
-  }
-
-  if ((facts.reviewStuck || 0) >= 2) {
-    issues.push(tip(
-      'review',
-      `Review is getting a bit full. ${facts.reviewStuck} tasks have sat there more than 3 days. Clear a couple before starting new stuff.`,
-      '/?status=review',
-    ));
-  }
-
-  const stale = [...(facts.staleProgress || [])].sort((a, b) => b.days - a.days)[0];
-  if (stale) {
-    issues.push(tip(
-      'checkin',
-      `Check in with ${stale.owner} on ${stale.title}. No update in ${stale.days} days.`,
-      `/tasks/${stale.id}`,
-    ));
-  }
-
-  const wip = people.filter((person) => person.inProgress > 5).sort((a, b) => b.inProgress - a.inProgress)[0];
-  if (wip) {
-    issues.push(tip(
-      'wip',
-      `${wip.name} has ${wip.inProgress} in progress. Finishing a couple before starting more usually keeps things moving.`,
-      `/?status=in_progress&assignee=${wip.id}`,
-    ));
-  }
-
-  if ((facts.unassignedNew || 0) >= 1) {
-    issues.push(tip(
+  const unassigned = facts.unassigned || 0;
+  if (unassigned > 0) {
+    tips.push(tip(
       'unassigned',
-      `${facts.unassignedNew} new task${facts.unassignedNew === 1 ? '' : 's'} still need a name on them.`,
-      '/?assignee=none',
-    ));
-  } else if ((facts.unassigned || 0) >= 2) {
-    issues.push(tip(
-      'unassigned',
-      `${facts.unassigned} open tasks are not assigned yet.`,
+      2,
+      unassigned === 1 ? '1 task has no owner. Assign it.' : `${unassigned} tasks have no owner. Assign them.`,
       '/?assignee=none',
     ));
   }
 
-  if ((facts.noDue || 0) >= 3) {
-    issues.push(tip(
-      'nodue',
-      `${facts.noDue} open tasks have no due date. A date on the ones that matter this week helps.`,
-      '/?nodue=1',
-    ));
-  }
-
-  if (enoughHistory && doneSample >= 5 && (facts.overdueNow || 0) > (facts.overdueStart || 0)) {
-    issues.push(tip(
-      'overdue-trend',
-      'Overdue items are up on the previous stretch. A short look at what is blocking them should help.',
+  const late = people.filter((person) => (person.overdue || 0) > 0)
+    .sort((a, b) => b.overdue - a.overdue || firstName(a.name).localeCompare(firstName(b.name)));
+  if (late.length) {
+    tips.push(tip(
+      'overdue',
+      3,
+      `${late.map((person) => `${firstName(person.name)} has ${person.overdue} overdue`).join(', ')}.`,
       '/?overdue=1',
     ));
   }
 
-  if (enoughHistory && doneSample >= 5 && (facts.donePeriod || 0) < (facts.donePrevious || 0)) {
-    issues.push(tip(
-      'throughput',
-      'Fewer tasks got finished than the period before. See what is in progress before pulling more in.',
+  const dueSoon = facts.dueSoon || 0;
+  if (dueSoon > 0) {
+    tips.push(tip(
+      'due-soon',
+      4,
+      countLine(dueSoon, 'is due in the next 3 days and has not been started.', 'are due in the next 3 days and have not been started.'),
+      '/?status=todo',
+    ));
+  }
+
+  const stale = facts.stale || 0;
+  if (stale > 0) {
+    tips.push(tip(
+      'stale',
+      5,
+      countLine(stale, 'has been in progress for more than 7 days with no update.', 'have been in progress for more than 7 days with no update.'),
       '/?status=in_progress',
     ));
   }
 
-  if ((facts.onTimeWeek || 0) >= 3) {
-    positives.push(tip(
-      'ontime',
-      `Nice, ${facts.onTimeWeek} tasks closed on time this week.`,
-      '/?status=done',
-      'good',
-    ));
-  }
-  if (facts.topFinisher && facts.topFinisher.done >= 3) {
-    positives.push(tip(
-      'finisher',
-      `${facts.topFinisher.name} closed ${facts.topFinisher.done} this week. Solid stretch.`,
-      '/?status=done',
-      'good',
+  const waiting = facts.reviewWaiting || 0;
+  if (facts.reviewUsed && waiting > 0) {
+    tips.push(tip(
+      'review',
+      6,
+      countLine(waiting, 'has been in review for more than 2 days.', 'have been in review for more than 2 days.'),
+      '/?status=review',
     ));
   }
 
-  const picked = issues.slice(0, positives.length ? 5 : 6);
-  if (positives.length) picked.push(positives[0]);
-  return picked.slice(0, 6);
+  const noDue = facts.noDue || 0;
+  if (noDue > 0) {
+    tips.push(tip(
+      'nodue',
+      7,
+      countLine(noDue, 'has no due date.', 'have no due date.'),
+      '/?nodue=1',
+    ));
+  }
+
+  if (spare.length && open > 0) {
+    tips.push(tip(
+      'idle',
+      8,
+      spare.length === 1
+        ? `${firstName(spare[0].name)} has nothing open, give them work.`
+        : `${joinNames(spare)} have nothing open, give them work.`,
+      '/',
+    ));
+  }
+
+  const quietProjects = (facts.projects || [])
+    .filter((project) => (project.open || 0) >= 4 && !project.assignedRecently)
+    .sort((a, b) => b.open - a.open || String(a.name).localeCompare(String(b.name)));
+  if (quietProjects.length === 1) {
+    const project = quietProjects[0];
+    tips.push(tip(
+      'project',
+      9,
+      `${project.name} has ${project.open} open tasks and nobody has been assigned there this month.`,
+      project.id ? `/?project=${project.id}` : '/',
+    ));
+  } else if (quietProjects.length > 1) {
+    tips.push(tip(
+      'project',
+      9,
+      `${joinLabels(quietProjects.map((project) => project.name))} have many open tasks and nobody has been assigned to them this month.`,
+      quietProjects[0].id ? `/?project=${quietProjects[0].id}` : '/',
+    ));
+  }
+
+  return tips.sort((a, b) => a.rank - b.rank || a.id.localeCompare(b.id)).slice(0, 6);
 }

@@ -176,6 +176,8 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(manage.text, /Tubecon logger/);
     assert.match(manage.text, /Needs attention/);
     assert.match(manage.text, /Tips/);
+    assert.doesNotMatch(manage.text, /Notes from this period/);
+    assert.doesNotMatch(manage.text, /You're holding|Most of the open work is with/);
     assert.match(manage.text, /Created vs done/);
     assert.match(manage.text, /Avg days to finish/);
     assert.match(manage.text, /If created stays above done/);

@@ -1,12 +1,6 @@
 import { colorForUser } from './colors.js';
 import { dateInJohannesburg, shiftDate, todayDate } from './time.js';
-import { coachTips, managerTip } from './coach.js';
-
-function weekStartDate(ymd) {
-  const [year, month, day] = ymd.split('-').map(Number);
-  const dow = new Date(Date.UTC(year, month - 1, day, 12)).getUTCDay();
-  return shiftDate(ymd, -((dow + 6) % 7));
-}
+import { coachTips } from './coach.js';
 
 function overlapSeconds(started, ended, fromMs, toMs) {
   const start = Date.parse(started);
@@ -292,15 +286,55 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     const entered = [...rows].reverse().find((row) => row.status === 'review');
     return nowMs - Date.parse(entered?.changed_at || task.created_at) > 3 * 86400000;
   }).length;
-  const staleProgress = live.filter((task) => task.status === 'in_progress' && Date.parse(task.updated_at) < nowMs - 7 * 86400000).map((task) => ({
-    id: task.id,
-    title: task.title,
-    owner: names.get((assignees.get(task.id) || [])[0]) || 'someone',
-    days: Math.max(1, Math.floor((nowMs - Date.parse(task.updated_at)) / 86400000)),
-  }));
-  const weekStartMs = Date.parse(`${weekStartDate(today)}T00:00:00+02:00`);
-  const onTimeWeek = live.filter((task) => task.status === 'done' && task.due_date && task.completed_at && Date.parse(task.completed_at) >= weekStartMs && dateInJohannesburg(task.completed_at) <= task.due_date).length;
-  const finisher = [...personStats].sort((a, b) => b.done - a.done)[0];
+  const asOf = monthWindow.current ? today : dateInJohannesburg(new Date(periodEnd - 1));
+  const asOfMs = monthWindow.current ? nowMs : Date.parse(`${asOf}T23:59:59+02:00`);
+  function statusAt(task) {
+    const rows = (hist.get(task.id) || []).filter((row) => Date.parse(row.changed_at) <= asOfMs);
+    if (rows.length) return rows[rows.length - 1].status;
+    return task.status;
+  }
+  const openScope = live.filter((task) => Date.parse(task.created_at) <= asOfMs && statusAt(task) !== 'done');
+  const ownersOf = (task) => assignees.get(task.id) || [];
+  const tipPeople = people.map((person) => {
+    const mine = openScope.filter((task) => ownersOf(task).includes(person.id));
+    return {
+      id: person.id,
+      name: person.name,
+      open: mine.length,
+      overdue: mine.filter((task) => task.due_date && task.due_date < asOf).length,
+    };
+  });
+  const soonEnd = shiftDate(asOf, 3);
+  const dueSoon = openScope.filter((task) => statusAt(task) === 'todo' && task.due_date && task.due_date >= asOf && task.due_date <= soonEnd).length;
+  const staleCount = openScope.filter((task) => statusAt(task) === 'in_progress' && Date.parse(task.updated_at) <= asOfMs - 7 * 86400000).length;
+  const reviewUsed = live.some((task) => task.status === 'review' || (hist.get(task.id) || []).some((row) => row.status === 'review'));
+  const reviewWaiting = openScope.filter((task) => {
+    if (statusAt(task) !== 'review') return false;
+    const rows = hist.get(task.id) || [];
+    const entered = [...rows].reverse().find((row) => row.status === 'review' && Date.parse(row.changed_at) <= asOfMs);
+    return asOfMs - Date.parse(entered?.changed_at || task.created_at) > 2 * 86400000;
+  }).length;
+  const recentAssign = new Set(db.prepare(`
+    SELECT task_id FROM activity
+    WHERE action = 'assignee' AND created_at >= ? AND created_at < ?
+  `).all(new Date(periodStart).toISOString(), new Date(periodEnd).toISOString()).map((row) => row.task_id));
+  const projectTips = [];
+  const seenProjects = new Map();
+  for (const task of openScope) {
+    if (!task.project_id) continue;
+    if (!seenProjects.has(task.project_id)) seenProjects.set(task.project_id, { id: task.project_id, name: task.project_name, open: 0, assignedRecently: false });
+    const row = seenProjects.get(task.project_id);
+    row.open += 1;
+  }
+  for (const row of seenProjects.values()) {
+    const mine = live.filter((task) => task.project_id === row.id);
+    row.assignedRecently = mine.some((task) => recentAssign.has(task.id) || (
+      Date.parse(task.created_at) >= periodStart
+      && Date.parse(task.created_at) < periodEnd
+      && ownersOf(task).length > 0
+    ));
+    projectTips.push(row);
+  }
   const monthRows = [];
   let monthCursor = today.slice(0, 7);
   for (let i = 0; i < 6; i += 1) {
@@ -354,24 +388,16 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     attention: attention.slice(0, 12),
     projects: projectRows,
     tips: coachTips({
-      periodDays: Math.max(1, Math.ceil(spanMs / 86400000)),
-      historyDays: Math.max(1, Math.ceil(spanMs / 86400000)),
-      open: openNow.length,
-      viewerId,
-      people: personStats.map((person) => ({ ...person, open: person.assigned })),
-      reviewStuck,
-      staleProgress,
-      noDue: openNow.filter((task) => !task.due_date).length,
-      unassigned: openNow.filter((task) => !(assignees.get(task.id) || []).length).length,
-      unassignedNew: openNow.filter((task) => !(assignees.get(task.id) || []).length && Date.parse(task.created_at) >= periodStart).length,
-      donePeriod: donePeriod.length,
-      donePrevious: donePrev.length,
-      overdueNow: overdueNow.length,
-      overdueStart: openThen.filter((task) => task.due_date && task.due_date < todayDate(new Date(periodStart))).length,
-      onTimeWeek,
-      topFinisher: finisher && finisher.done >= 3 ? { name: finisher.name, done: finisher.done } : null,
+      open: openScope.length,
+      people: tipPeople,
+      unassigned: openScope.filter((task) => !ownersOf(task).length).length,
+      dueSoon,
+      stale: staleCount,
+      reviewUsed,
+      reviewWaiting,
+      noDue: openScope.filter((task) => !task.due_date).length,
+      projects: projectTips,
     }),
     hasReview: live.some((task) => task.status === 'review'),
-    managerTip: managerTip(now, { review: live.some((task) => task.status === 'review') }),
   };
 }

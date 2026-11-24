@@ -852,9 +852,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       <div class="sheet-body">
         <section class="coach">
           <h2 class="light-h">Tips</h2>
-          <p class="card-sub">Notes from this period, and one general reminder.</p>
-          ${board.tips.length ? `<ul class="coach-list">${board.tips.map((item) => `<li class="${item.tone === 'good' ? 'good' : ''}"><a href="${esc(item.href)}">${esc(item.text)}</a></li>`).join('')}</ul>` : '<p class="hint">Nothing to flag on this sample.</p>'}
-          <p class="manager-tip">${esc(board.managerTip)}</p>
+          ${board.tips.length ? `<ul class="coach-list">${board.tips.map((item) => `<li><a href="${esc(item.href)}">${esc(item.text)}</a></li>`).join('')}</ul>` : '<p class="hint">All good this month.</p>'}
         </section>
         <div class="kpi-row">
           <div class="kpi"><div class="kpi-top"><span>Open</span>${kpiSpark(k.sparkOpen, '#111')}</div><strong>${k.open}</strong>${delta(k.open, k.openPrev, 'neutral', board.compare)}</div>
