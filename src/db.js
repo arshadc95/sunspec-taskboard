@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { hashPassword } from './passwords.js';
+import { entrySeconds } from './time.js';
 
 export function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -102,6 +103,17 @@ function migrate(db) {
 
     CREATE INDEX IF NOT EXISTS idx_activity_task ON activity(task_id);
     CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id);
+
+    CREATE TABLE IF NOT EXISTS time_entries (
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_time_task ON time_entries(task_id);
+    CREATE INDEX IF NOT EXISTS idx_time_user_open ON time_entries(user_id, ended_at);
   `);
   const taskColumns = db.prepare('PRAGMA table_info(tasks)').all();
   if (!taskColumns.some((column) => column.name === 'project_id')) {
@@ -602,5 +614,136 @@ export function managementReport(db, filters) {
       done7: totals.done_7 || 0,
       done30: totals.done_30 || 0,
     },
+  };
+}
+
+export function listRunningTimers(db) {
+  return db.prepare(`
+    SELECT te.*, u.name AS user_name, t.title AS task_title
+    FROM time_entries te
+    JOIN users u ON u.id = te.user_id
+    JOIN tasks t ON t.id = te.task_id
+    WHERE te.ended_at IS NULL
+    ORDER BY te.started_at ASC
+  `).all();
+}
+
+export function getRunningTimer(db, userId) {
+  return db.prepare(`
+    SELECT te.*, t.title AS task_title
+    FROM time_entries te
+    JOIN tasks t ON t.id = te.task_id
+    WHERE te.user_id = ? AND te.ended_at IS NULL
+  `).get(userId) || null;
+}
+
+export function startTimer(db, { userId, taskId }) {
+  const now = new Date().toISOString();
+  return db.transaction(() => {
+    const running = db.prepare(`
+      SELECT * FROM time_entries WHERE user_id = ? AND ended_at IS NULL
+    `).get(userId);
+    if (running && running.task_id === taskId) return { already: true, entry: running, stopped: null };
+    let stopped = null;
+    if (running) {
+      db.prepare('UPDATE time_entries SET ended_at = ? WHERE id = ?').run(now, running.id);
+      stopped = { ...running, ended_at: now };
+    }
+    const info = db.prepare(`
+      INSERT INTO time_entries (task_id, user_id, started_at, ended_at)
+      VALUES (?, ?, ?, NULL)
+    `).run(taskId, userId, now);
+    return { already: false, stopped, id: Number(info.lastInsertRowid), startedAt: now };
+  })();
+}
+
+export function stopTimer(db, { userId, taskId }) {
+  const running = db.prepare(`
+    SELECT * FROM time_entries WHERE user_id = ? AND task_id = ? AND ended_at IS NULL
+  `).get(userId, taskId);
+  if (!running) return null;
+  const now = new Date().toISOString();
+  db.prepare('UPDATE time_entries SET ended_at = ? WHERE id = ?').run(now, running.id);
+  return { ...running, ended_at: now };
+}
+
+export function listTimeEntries(db, taskId) {
+  return db.prepare(`
+    SELECT te.*, u.name AS user_name
+    FROM time_entries te
+    JOIN users u ON u.id = te.user_id
+    WHERE te.task_id = ?
+    ORDER BY te.started_at DESC, te.id DESC
+  `).all(taskId);
+}
+
+export function timeTotals(db, now = Date.now()) {
+  const totals = new Map();
+  for (const row of db.prepare('SELECT task_id, started_at, ended_at FROM time_entries').all()) {
+    totals.set(row.task_id, (totals.get(row.task_id) || 0) + entrySeconds(row.started_at, row.ended_at, now));
+  }
+  return totals;
+}
+
+export function timeReport(db, filters, now = Date.now()) {
+  const where = [];
+  const params = [];
+  if (filters.projectId) {
+    where.push('t.project_id = ?');
+    params.push(filters.projectId);
+  }
+  if (filters.personId && filters.personId !== 'none') {
+    where.push('te.user_id = ?');
+    params.push(filters.personId);
+  }
+  if (filters.personId === 'none') where.push('0 = 1');
+  const entries = db.prepare(`
+    SELECT te.task_id, te.user_id, te.started_at, te.ended_at,
+      t.title, t.status, t.project_id, u.name AS user_name, p.name AS project_name
+    FROM time_entries te
+    JOIN tasks t ON t.id = te.task_id
+    JOIN users u ON u.id = te.user_id
+    LEFT JOIN projects p ON p.id = t.project_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+  `).all(...params);
+
+  const byTask = new Map();
+  const byPerson = new Map();
+  const byProject = new Map();
+  for (const entry of entries) {
+    const seconds = entrySeconds(entry.started_at, entry.ended_at, now);
+    const task = byTask.get(entry.task_id) || { id: entry.task_id, title: entry.title, project_name: entry.project_name || 'No project', seconds: 0 };
+    task.seconds += seconds;
+    byTask.set(entry.task_id, task);
+    const person = byPerson.get(entry.user_id) || { id: entry.user_id, name: entry.user_name, seconds: 0 };
+    person.seconds += seconds;
+    byPerson.set(entry.user_id, person);
+    const projectKey = entry.project_id || 0;
+    const project = byProject.get(projectKey) || { id: entry.project_id, name: entry.project_name || 'No project', seconds: 0 };
+    project.seconds += seconds;
+    byProject.set(projectKey, project);
+  }
+
+  const doneWhere = ["t.status = 'done'"];
+  const doneParams = [];
+  if (filters.projectId) {
+    doneWhere.push('t.project_id = ?');
+    doneParams.push(filters.projectId);
+  }
+  const doneIds = new Set(db.prepare(`SELECT id FROM tasks t WHERE ${doneWhere.join(' AND ')}`).all(...doneParams).map((row) => row.id));
+  const secondsByDone = new Map();
+  for (const entry of entries) {
+    if (!doneIds.has(entry.task_id)) continue;
+    secondsByDone.set(entry.task_id, (secondsByDone.get(entry.task_id) || 0) + entrySeconds(entry.started_at, entry.ended_at, now));
+  }
+  const timed = [...secondsByDone.values()];
+  const sort = (rows) => rows.sort((a, b) => b.seconds - a.seconds || String(a.name || a.title).localeCompare(String(b.name || b.title)));
+  return {
+    byTask: sort([...byTask.values()]),
+    byPerson: sort([...byPerson.values()]),
+    byProject: sort([...byProject.values()]),
+    averageSeconds: timed.length ? Math.round(timed.reduce((sum, value) => sum + value, 0) / timed.length) : 0,
+    completedWithTime: timed.length,
+    completedCount: doneIds.size,
   };
 }

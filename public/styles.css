@@ -203,8 +203,15 @@ tr.group td {
 }
 tr.group:hover td { background: #f3f4f6; }
 .group-count { color: var(--muted); font-weight: 700; margin-left: 4px; }
-.title-link { color: #111; font-weight: 600; text-decoration: none; }
-.title-link:hover { color: #c2410c; }
+.title-link { color: #111; font-weight: 600; text-decoration: none; cursor: pointer; }
+.title-link:hover { color: #c2410c; text-decoration: underline; }
+tr.task-row { cursor: pointer; }
+tr.task-row:hover td { background: #fff7ed; }
+.task-card { cursor: pointer; }
+.dot { color: #16a34a; font-weight: 700; }
+.dot.mine { color: #c2410c; }
+.time { white-space: nowrap; }
+table.compact { margin: 6px 0 12px; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .when { white-space: nowrap; color: #333; }
 tr.overdue td { background: #fde8e8; }

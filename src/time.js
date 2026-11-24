@@ -67,6 +67,24 @@ export function daysAgoIso(days, now = new Date()) {
   return new Date(now.getTime() - days * 86400000).toISOString();
 }
 
+export function entrySeconds(startedAt, endedAt, now = Date.now()) {
+  const start = Date.parse(startedAt);
+  const end = endedAt ? Date.parse(endedAt) : now;
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 1000));
+}
+
+export function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours && minutes) return `${hours}h ${minutes}m`;
+  if (hours) return `${hours}h`;
+  if (minutes) return `${minutes}m`;
+  if (total >= 1) return `${total}s`;
+  return '0m';
+}
+
 export function daysBetween(due, today) {
   const [year, month, day] = due.split('-').map(Number);
   const [ty, tm, td] = today.split('-').map(Number);

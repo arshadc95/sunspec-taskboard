@@ -279,7 +279,7 @@ test('login, roles, tasks, and comments', { timeout: 60000 }, async () => {
     assert.equal(cannotDeleteTask.status, 403);
 
     const board = await page(base, session.cookies, '/');
-    const rows = [...board.text.matchAll(/<tr class="([^"]*)">([\s\S]*?)<\/tr>/g)];
+    const rows = [...board.text.matchAll(/<tr class="([^"]*)"[^>]*>([\s\S]*?)<\/tr>/g)];
     const install = rows.find((row) => row[2].includes('Install logger'));
     const finished = rows.find((row) => row[2].includes('Already finished'));
     assert.ok(install);

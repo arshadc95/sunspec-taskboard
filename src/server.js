@@ -42,13 +42,20 @@ import {
   listActivity,
   listAttachments,
   listProjects,
+  listRunningTimers,
+  listTimeEntries,
+  getRunningTimer,
   managementReport,
   setCommentMentions,
+  startTimer,
+  stopTimer,
+  timeReport,
+  timeTotals,
 } from './db.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canDeleteComment, canDeleteTask, canEditTask, canEditUser, isStaff } from './permissions.js';
-import { daysAgoIso, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
+import { daysAgoIso, entrySeconds, formatDue, isValidDate, startOfWeekIso, todayDate } from './time.js';
 import {
   renderBoard,
   renderForbidden,
@@ -303,7 +310,7 @@ export function createApp(config) {
       user: req.user,
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
-      tasks,
+      tasks: withTime(db, tasks),
       filters,
       users: listActiveUsers(db),
       projects: listProjects(db),
@@ -350,6 +357,7 @@ export function createApp(config) {
       csrf: ensureCsrf(req, res),
       msg: String(req.query.msg || ''),
       report: managementReport(db, filters),
+      time: timeReport(db, filters),
       projects: listProjects(db),
       users: listActiveUsers(db),
       filters,
@@ -400,6 +408,7 @@ export function createApp(config) {
       projects: listProjects(db),
       activity: listActivity(db, task.id),
       attachments: listAttachments(db, task.id),
+      timer: timerView(db, task, req.user.id),
       canEdit: canEditTask(req.user, task),
       canDelete: canDeleteTask(req.user),
       commentPerms,
@@ -420,6 +429,43 @@ export function createApp(config) {
     const updated = updateTask(db, task.id, { ...parsed, projectId });
     logTaskChanges(db, req.user, task, updated);
     res.redirect(`/tasks/${task.id}?msg=saved`);
+  });
+
+  app.post('/tasks/:id/timer/start', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const result = startTimer(db, { userId: req.user.id, taskId: task.id });
+    if (result.already) return res.redirect(`/tasks/${task.id}?msg=running`);
+    if (result.stopped) {
+      addActivity(db, { taskId: result.stopped.task_id, actorId: req.user.id, action: 'timer', detail: 'Stopped the timer' });
+    }
+    if (task.status === 'todo') {
+      const updated = updateTask(db, task.id, {
+        title: task.title,
+        description: task.description,
+        assigneeId: task.assignee_id,
+        status: 'in_progress',
+        priority: task.priority,
+        dueDate: task.due_date,
+        projectId: task.project_id,
+      });
+      logTaskChanges(db, req.user, task, updated);
+    }
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: 'Started a timer' });
+    res.redirect(`/tasks/${task.id}?msg=started`);
+  });
+
+  app.post('/tasks/:id/timer/stop', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const stopped = stopTimer(db, { userId: req.user.id, taskId: task.id });
+    if (!stopped) return res.redirect(`/tasks/${task.id}?msg=notimer`);
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: 'Stopped the timer' });
+    res.redirect(`/tasks/${task.id}?msg=stopped`);
   });
 
   app.post('/tasks/:id/delete', requireUser, (req, res) => {
@@ -578,6 +624,43 @@ export function createApp(config) {
   });
 
   return app;
+}
+
+function withTime(db, tasks) {
+  const totals = timeTotals(db);
+  const runningByTask = new Map();
+  for (const row of listRunningTimers(db)) {
+    if (!runningByTask.has(row.task_id)) runningByTask.set(row.task_id, []);
+    runningByTask.get(row.task_id).push(row);
+  }
+  return tasks.map((task) => ({
+    ...task,
+    time_seconds: totals.get(task.id) || 0,
+    running: runningByTask.get(task.id) || [],
+  }));
+}
+
+function timerView(db, task, userId) {
+  const entries = listTimeEntries(db, task.id);
+  const perUser = new Map();
+  let total = 0;
+  for (const entry of entries) {
+    const seconds = entrySeconds(entry.started_at, entry.ended_at);
+    total += seconds;
+    const current = perUser.get(entry.user_id) || { user_id: entry.user_id, user_name: entry.user_name, seconds: 0 };
+    current.seconds += seconds;
+    perUser.set(entry.user_id, current);
+  }
+  const running = getRunningTimer(db, userId);
+  return {
+    mine: running && running.task_id === task.id ? running : null,
+    other: running && running.task_id !== task.id ? running : null,
+    entries,
+    summary: {
+      total,
+      perUser: [...perUser.values()].sort((a, b) => b.seconds - a.seconds),
+    },
+  };
 }
 
 function readFilters(req) {

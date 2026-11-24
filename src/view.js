@@ -1,5 +1,5 @@
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { daysBetween, formatDateTime, formatDue, isOverdue } from './time.js';
+import { daysBetween, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue } from './time.js';
 
 const ICONS = {
   tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
@@ -10,7 +10,7 @@ const ICONS = {
   chart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16v-5M12 16V8M16 16v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 };
 
-const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig']);
+const BAD_MSGS = new Set(['badlogin', 'ratelimit', 'invalid', 'forbidden', 'email', 'lastsuper', 'short', 'toobig', 'notimer']);
 
 export function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -75,6 +75,10 @@ function banner(msg) {
     badlogin: 'Invalid email or password.',
     ratelimit: 'Too many login attempts. Try again in 15 minutes.',
     saved: 'Saved.',
+    started: 'Timer started.',
+    stopped: 'Timer stopped.',
+    running: 'A timer is already running on this task.',
+    notimer: 'No timer is running on this task.',
     created: 'Task created.',
     commented: 'Comment added.',
     deleted: 'Deleted.',
@@ -225,15 +229,24 @@ function taskForm({ task, users, projects, csrf, canEdit }) {
   return `<form class="stack" method="post" action="${action}">${fields}</form>`;
 }
 
-function taskCard(task, today) {
+function timerMark(task, user) {
+  const running = task.running || [];
+  if (!running.length) return '';
+  const names = running.map((row) => row.user_name).join(', ');
+  const mine = running.some((row) => row.user_id === user.id);
+  return `<span class="dot${mine ? ' mine' : ''}" title="Timer running: ${esc(names)}">●</span> `;
+}
+
+function taskCard(task, today, user) {
   const overdue = isOverdue(task.due_date, task.status, today);
-  return `<article class="task-card${overdue ? ' overdue' : ''}">
+  return `<article class="task-card${overdue ? ' overdue' : ''}" data-href="/tasks/${task.id}">
     <a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
       <span class="due">${esc(formatDue(task.due_date))}</span>
+      <span class="time">${timerMark(task, user)}${esc(formatDuration(task.time_seconds || 0))}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
   </article>`;
@@ -245,24 +258,25 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
     label,
     rows: tasks.filter((task) => task.status === status),
   })).filter((group) => group.rows.length);
-  const cards = tasks.map((task) => taskCard(task, today)).join('');
+  const cards = tasks.map((task) => taskCard(task, today, user)).join('');
   const table = groups.length
     ? `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
-          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Comments</th><th>Updated</th>
+          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th>
         </tr></thead>
         <tbody>
           ${groups.map((group) => `
-            <tr class="group"><td colspan="8">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
+            <tr class="group"><td colspan="9">${esc(group.label)} <span class="group-count">${group.rows.length}</span></td></tr>
             ${group.rows.map((task) => {
               const overdue = isOverdue(task.due_date, task.status, today);
-              return `<tr class="${overdue ? 'overdue' : ''}">
+              return `<tr class="task-row${overdue ? ' overdue' : ''}" data-href="/tasks/${task.id}">
                 <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
                 <td>${esc(task.project_name || '—')}</td>
                 <td>${esc(task.assignee_name || '—')}</td>
                 <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
                 <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
                 <td class="due">${esc(formatDue(task.due_date))}</td>
+                <td class="time">${timerMark(task, user)}${esc(formatDuration(task.time_seconds || 0))}</td>
                 <td class="num">${task.comment_count}</td>
                 <td class="when">${esc(formatDateTime(task.updated_at))}</td>
               </tr>`;
@@ -316,7 +330,28 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   });
 }
 
-export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], canEdit, canDelete, commentPerms }) {
+function renderTimer(task, csrf, timer) {
+  if (!task?.id || !timer) return '';
+  const mine = timer.mine;
+  const summary = timer.summary || { total: 0, perUser: [] };
+  const entries = timer.entries || [];
+  const controls = mine
+    ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
+      <form method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-danger" type="submit">Stop</button></form>`
+    : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
+      ${timer.other ? `<p class="hint">Starting stops your timer on <a href="/tasks/${timer.other.task_id}">${esc(timer.other.task_title)}</a>.</p>` : ''}`;
+  return `<section class="panel pad">
+    <h2>Time</h2>
+    ${controls}
+    <p>Total ${esc(formatDuration(summary.total))}</p>
+    ${summary.perUser.length ? `<table class="grid compact"><thead><tr><th>Person</th><th>Time</th></tr></thead><tbody>
+      ${summary.perUser.map((person) => `<tr><td>${esc(person.user_name)}</td><td>${esc(formatDuration(person.seconds))}</td></tr>`).join('')}
+    </tbody></table>` : '<p class="hint">No time logged yet.</p>'}
+    ${entries.length ? `<h2>Entries</h2><ul class="plain">${entries.map((entry) => `<li>${esc(entry.user_name)} · ${esc(formatDateTime(entry.started_at))} – ${entry.ended_at ? esc(formatDateTime(entry.ended_at)) : 'running'} · ${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}</li>`).join('')}</ul>` : ''}
+  </section>`;
+}
+
+export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], timer = null, canEdit, canDelete, commentPerms }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
@@ -365,6 +400,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit })}
         ${deleteForm}
       </section>
+      ${renderTimer(task, csrf, timer)}
       ${isNew ? '' : `<section class="panel pad">
         <h2>Files</h2>
         ${attachments.length ? `<ul class="files">${attachments.map((file) => {
@@ -449,7 +485,14 @@ export function renderUsers({ user, csrf, msg, users }) {
   });
 }
 
-export function renderManage({ user, csrf, msg, report, projects, users, filters, today }) {
+function durationRows(items, labelKey) {
+  if (!items.length) return '<p class="hint">No time logged.</p>';
+  return `<table class="grid compact"><thead><tr><th>${labelKey === 'title' ? 'Task' : 'Name'}</th><th>Time</th></tr></thead><tbody>
+    ${items.map((item) => `<tr><td>${item.id && labelKey === 'title' ? `<a href="/tasks/${item.id}">${esc(item[labelKey])}</a>` : esc(item[labelKey])}</td><td>${esc(formatDuration(item.seconds))}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+
+export function renderManage({ user, csrf, msg, report, time, projects, users, filters, today }) {
   const rows = [...report.people];
   if (report.unassigned && ((report.unassigned.open_count || 0) + (report.unassigned.overdue_count || 0) + (report.unassigned.done_week || 0)) > 0) {
     rows.push({ name: 'Unassigned', ...report.unassigned });
@@ -485,7 +528,18 @@ export function renderManage({ user, csrf, msg, report, projects, users, filters
       <div class="stat"><span>Done this week</span><strong>${report.totals.doneWeek}</strong></div>
       <div class="stat"><span>Done in 7 days</span><strong>${report.totals.done7}</strong></div>
       <div class="stat"><span>Done in 30 days</span><strong>${report.totals.done30}</strong></div>
+      <div class="stat"><span>Avg completed</span><strong>${esc(formatDuration(time?.averageSeconds || 0))}</strong></div>
     </div>
+    <section class="panel pad">
+      <h2>Time spent</h2>
+      <p class="hint">Average is the mean logged time on completed tasks that have a time entry (${time?.completedWithTime || 0} of ${time?.completedCount || 0} completed). A running timer counts up to now.</p>
+      <h2>By person</h2>
+      ${durationRows(time?.byPerson || [], 'name')}
+      <h2>By project</h2>
+      ${durationRows(time?.byProject || [], 'name')}
+      <h2>By task</h2>
+      ${durationRows(time?.byTask || [], 'title')}
+    </section>
     <section class="panel pad">
       <h2>Open tasks by person</h2>
       ${bars || '<p class="hint">No people to show.</p>'}
