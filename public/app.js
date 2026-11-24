@@ -141,6 +141,87 @@ drawer?.addEventListener('click', (event) => {
   if (event.target === drawer) drawer.close();
 });
 drawer?.querySelector('.task-form')?.addEventListener('submit', () => drawer.close());
+
+const reviewDialog = document.getElementById('review-dialog');
+const reviewForm = reviewDialog?.querySelector('[data-review-form]');
+const reviewerSearch = reviewForm?.querySelector('[data-reviewer-search]');
+const reviewerId = reviewForm?.querySelector('[data-reviewer-id]');
+if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
+  const menu = document.createElement('div');
+  menu.className = 'combo-menu';
+  menu.hidden = true;
+  watchMenu(menu, reviewerSearch);
+  let menuIndex = 0;
+  let chosenName = '';
+  const renderReviewers = () => {
+    const query = reviewerSearch.value.trim().toLowerCase();
+    const matches = readJson('people-data').filter((item) => item.name.toLowerCase().includes(query)).slice(0, 8);
+    menu.innerHTML = '';
+    matches.forEach((item, itemIndex) => {
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.textContent = item.name;
+      if (itemIndex === menuIndex) choice.classList.add('active');
+      choice.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        reviewerId.value = String(item.id);
+        chosenName = item.name;
+        reviewerSearch.value = item.name;
+        menu.hidden = true;
+      });
+      menu.append(choice);
+    });
+    menu.hidden = matches.length === 0;
+    if (!menu.hidden) {
+      hideOtherMenus(menu);
+      placeCombo(menu, reviewerSearch);
+    }
+  };
+  reviewerSearch.addEventListener('input', () => {
+    if (reviewerSearch.value !== chosenName) reviewerId.value = '';
+    menuIndex = 0;
+    renderReviewers();
+  });
+  reviewerSearch.addEventListener('focus', renderReviewers);
+  reviewerSearch.addEventListener('keydown', (event) => {
+    const buttons = [...menu.querySelectorAll('button')];
+    if (event.key === 'ArrowDown') { event.preventDefault(); menuIndex = Math.min(buttons.length - 1, menuIndex + 1); renderReviewers(); }
+    if (event.key === 'ArrowUp') { event.preventDefault(); menuIndex = Math.max(0, menuIndex - 1); renderReviewers(); }
+    if (event.key === 'Enter' && !menu.hidden && buttons[menuIndex]) {
+      event.preventDefault();
+      buttons[menuIndex].dispatchEvent(new MouseEvent('mousedown'));
+    }
+  });
+  const closeReview = () => { menu.hidden = true; reviewDialog.close(); };
+  document.querySelectorAll('[data-send-review]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      reviewForm.action = `/tasks/${button.dataset.task}/review`;
+      reviewForm.querySelector('[data-review-back]').value = button.dataset.back || '/';
+      reviewerId.value = '';
+      chosenName = '';
+      reviewerSearch.value = '';
+      const note = reviewForm.querySelector('[name="note"]');
+      if (note) note.value = '';
+      if (!reviewDialog.open) reviewDialog.showModal();
+      reviewerSearch.focus();
+    });
+  });
+  reviewDialog.querySelector('[data-close-review]')?.addEventListener('click', closeReview);
+  reviewDialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    closeReview();
+  });
+  reviewDialog.addEventListener('click', (event) => {
+    if (event.target === reviewDialog) closeReview();
+  });
+  reviewForm.addEventListener('submit', (event) => {
+    if (!reviewerId.value) {
+      event.preventDefault();
+      reviewerSearch.focus();
+    }
+  });
+}
 document.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {

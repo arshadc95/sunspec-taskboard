@@ -24,6 +24,7 @@ import {
   latestGrokMessageId,
   listActiveUsers,
   listComments,
+  mentionReviewer,
   listProjects,
   listTasks,
   recordGrokRequest,
@@ -172,6 +173,8 @@ function taskJson(task, comments) {
     assignee: task.assignee_name || null,
     project_id: task.project_id,
     project: task.project_name || null,
+    reviewer_id: task.reviewer_id || null,
+    reviewer: task.reviewer_name || null,
     created_by: task.created_by,
     comment_count: task.comment_count,
   };
@@ -352,16 +355,32 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
     }
     const title = req.body.title === undefined ? task.title : String(req.body.title).trim();
     if (!title) return json(res, 400, { error: 'title is required' });
+    let reviewerId;
+    if (req.body.reviewer_id !== undefined && status === 'review') {
+      const reviewer = getUser(db, Number(req.body.reviewer_id));
+      if (!reviewer || !reviewer.active || reviewer.is_bot) return json(res, 400, { error: 'Unknown reviewer' });
+      reviewerId = reviewer.id;
+    }
     const updated = updateTask(db, task.id, {
       title,
       description: req.body.description === undefined ? task.description : String(req.body.description),
       assigneeId,
       assigneeIds,
       status,
+      reviewerId,
       priority,
       dueDate: due || null,
       projectId,
     });
+    if (status === 'review' && reviewerId && reviewerId !== task.reviewer_id) {
+      const reviewer = getUser(db, reviewerId);
+      mentionReviewer(db, {
+        taskId: task.id,
+        authorId: actor.id,
+        reviewer,
+        note: String(req.body.note || ''),
+      });
+    }
     const changed = [
       task.status !== updated.status ? `status ${labelOf(STATUSES, updated.status)}` : '',
       task.title !== updated.title ? 'title' : '',

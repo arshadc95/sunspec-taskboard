@@ -10,6 +10,7 @@ import {
   addActivity,
   addAttachment,
   addComment,
+  mentionReviewer,
   boardCounts,
   bootstrapSuperuser,
   clearLoginAttempts,
@@ -621,20 +622,28 @@ export function createApp(config) {
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     if (!canCompleteTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
-    if (task.status !== 'review' && task.status !== 'done') {
-      const updated = updateTask(db, task.id, {
-        title: task.title,
-        description: task.description,
-        assigneeId: task.assignee_id,
-        status: 'review',
-        priority: task.priority,
-        dueDate: task.due_date,
-        projectId: task.project_id,
-      });
-      logTaskChanges(db, req.user, task, updated);
-      addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Sent the task to review' });
+    if (task.status === 'review' || task.status === 'done') return res.redirect(safeNext(String(req.body.back || '/')));
+    const reviewer = getUser(db, numericId(req.body.reviewer_id));
+    const back = safeNext(String(req.body.back || '/'));
+    if (!reviewer || !reviewer.active || reviewer.is_bot) {
+      const join = back.includes('?') ? '&' : '?';
+      return res.redirect(`${back}${join}msg=invalid`);
     }
-    res.redirect(safeNext(String(req.body.back || '/')));
+    const note = String(req.body.note || '').trim().slice(0, 280);
+    const updated = updateTask(db, task.id, {
+      title: task.title,
+      description: task.description,
+      assigneeId: task.assignee_id,
+      status: 'review',
+      reviewerId: reviewer.id,
+      priority: task.priority,
+      dueDate: task.due_date,
+      projectId: task.project_id,
+    });
+    mentionReviewer(db, { taskId: task.id, authorId: req.user.id, reviewer, note });
+    logTaskChanges(db, req.user, task, updated);
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Sent the task to review' });
+    res.redirect(back);
   });
 
   app.post('/tasks/:id/complete', requireUser, (req, res) => {

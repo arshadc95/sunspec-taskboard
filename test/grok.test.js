@@ -264,6 +264,24 @@ test('grok chat, mentions, and bot api', { timeout: 60000 }, async () => {
       body: JSON.stringify({ acting_user_id: arshadId, status: 'in_progress', assignee_id: lindiId }),
     });
     assert.equal(edited.status, 200);
+    const badReviewer = await fetch(`${base}/api/bot/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshadId, status: 'review', reviewer_id: 99999 }),
+    });
+    assert.equal(badReviewer.status, 400);
+    const reviewed = await fetch(`${base}/api/bot/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshadId, status: 'review', reviewer_id: lindiId, note: 'Check the fan' }),
+    });
+    assert.equal(reviewed.status, 200);
+    const reviewedTask = await reviewed.json();
+    assert.equal(reviewedTask.task.status, 'review');
+    assert.equal(reviewedTask.task.reviewer_id, lindiId);
+    assert.equal(reviewedTask.task.reviewer, 'Lindi Nkosi');
+    const lindiMentions = await page(base, lindi, '/?mentions=1');
+    assert.match(lindiMentions.text, /Replace the inverter fan/);
     const done = await fetch(`${base}/api/bot/complete/${taskId}`, {
       method: 'POST',
       headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },

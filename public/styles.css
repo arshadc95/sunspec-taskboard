@@ -593,7 +593,7 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .assignee-chips:empty { display: none; }
 .assignee-chip { display: inline-flex; align-items: center; gap: 4px; background: #111; color: #fff; padding: 4px 8px; font-size: 12px; }
 .assignee-chip button { border: 0; background: transparent; color: #fff; cursor: pointer; font-weight: 700; }
-#task-drawer.drawer {
+#task-drawer.drawer, #review-dialog.drawer {
   inset: 0;
   margin: auto;
   width: min(640px, calc(100vw - 32px));
@@ -601,14 +601,17 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
   max-height: 90vh;
   background: #fff;
 }
+#review-dialog.drawer { width: min(420px, calc(100vw - 32px)); }
 #task-drawer::backdrop { background: rgba(0, 0, 0, 0.5); }
+#review-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #task-drawer .task-form, #task-drawer .form-sections { background: #fff; height: auto; }
 #task-drawer .form-sections { max-height: calc(90vh - 120px); }
 #task-drawer .form-card { background: transparent; overflow: visible; }
 #task-drawer .form-card h2 { display: none; }
 #task-drawer .form-card > .field { padding: 0 0 16px; }
+.reviewer { display: block; margin-top: 2px; color: #555; font-size: 12px; font-weight: 600; }
 @media (max-width: 800px) {
-  #task-drawer.drawer { width: 100vw; height: 100vh; max-height: 100vh; margin: 0; }
+  #task-drawer.drawer, #review-dialog.drawer { width: 100vw; height: 100vh; max-height: 100vh; margin: 0; }
   #task-drawer .form-sections { max-height: none; flex: 1; }
   .pair { grid-template-columns: 1fr; }
 }

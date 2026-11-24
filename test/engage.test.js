@@ -104,17 +104,31 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.doesNotMatch(board.text, />Apply</);
     assert.doesNotMatch(board.text, /timer\/start/);
     assert.match(board.text, /title="Send to review"/);
-    assert.match(board.text, new RegExp(`/tasks/${taskId}/review`));
-    const reviewed = await post(base, thabang, `/tasks/${taskId}/review`, { _csrf: opened.csrf, back: '/' });
+    assert.match(board.text, /id="review-dialog"/);
+    assert.match(board.text, /data-send-review/);
+    const arshadId = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
+    const missing = await post(base, thabang, `/tasks/${taskId}/review`, { _csrf: opened.csrf, back: '/' });
+    assert.match(missing.headers.get('location'), /msg=invalid/);
+    assert.equal(db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId).status, 'todo');
+    const reviewed = await post(base, thabang, `/tasks/${taskId}/review`, {
+      _csrf: opened.csrf, back: '/', reviewer_id: String(arshadId), note: 'Check the meter',
+    });
     assert.equal(reviewed.status, 302);
     assert.equal(db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId).status, 'review');
+    assert.equal(db.prepare('SELECT reviewer_id FROM tasks WHERE id = ?').get(taskId).reviewer_id, arshadId);
     assert.deepEqual(
       db.prepare('SELECT status FROM task_status_history WHERE task_id = ? ORDER BY id').all(taskId).map((row) => row.status),
       ['todo', 'review'],
     );
     const inReview = await page(base, thabang, '/');
     assert.match(inReview.text, /Review <span class="group-count">1<\/span>/);
-    assert.doesNotMatch(inReview.text, new RegExp(`/tasks/${taskId}/review`));
+    assert.match(inReview.text, /Reviewer: Arshad/);
+    assert.doesNotMatch(inReview.text, /data-send-review/);
+    const reviewMentions = await page(base, admin, '/?mentions=1');
+    assert.match(reviewMentions.text, /Site visit/);
+    const detail = await page(base, admin, `/tasks/${taskId}`);
+    assert.match(detail.text, /Reviewer: Arshad/);
+    assert.match(detail.text, /Check the meter/);
     const stranger = await post(base, admin, `/tasks/${taskId}/timer/start`, { _csrf: users.csrf });
     assert.equal(stranger.status, 403);
     const started = await post(base, thabang, `/tasks/${taskId}/timer/start`, { _csrf: opened.csrf, return: 'board', back: '/' });

@@ -371,13 +371,36 @@ function canQuickStatus(user, task) {
   return Array.isArray(task.assignee_ids) && task.assignee_ids.includes(user.id);
 }
 
-function reviewControl(task, user, csrf, back) {
+function reviewerMark(task) {
+  if (task.status !== 'review' || !task.reviewer_name) return '';
+  return `<span class="reviewer">Reviewer: ${esc(task.reviewer_name)}</span>`;
+}
+
+function reviewControl(task, user, back) {
   if (task.status === 'review' || task.status === 'done' || !canQuickStatus(user, task)) return '';
-  return `<form class="row-review" method="post" action="/tasks/${task.id}/review">
-    <input type="hidden" name="_csrf" value="${esc(csrf)}">
-    <input type="hidden" name="back" value="${esc(back)}">
-    <button class="btn btn-tiny review" type="submit" title="Send to review" aria-label="Send to review">R</button>
-  </form>`;
+  return `<button type="button" class="btn btn-tiny review" data-send-review data-task="${task.id}" data-back="${esc(back)}" title="Send to review" aria-label="Send to review">R</button>`;
+}
+
+function reviewDialog(csrf) {
+  return `<dialog id="review-dialog" class="drawer">
+    <div class="drawer-bar"><h2>Send to review</h2><button type="button" class="drawer-close" data-close-review aria-label="Close">×</button></div>
+    <form class="task-form" method="post" action="/tasks/0/review" data-review-form>
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <input type="hidden" name="back" value="/" data-review-back>
+      <div class="form-sections">
+        <div class="form-card">
+          <label class="field">Reviewer
+            <input data-reviewer-search placeholder="Search people" autocomplete="off">
+            <input type="hidden" name="reviewer_id" value="" data-reviewer-id>
+          </label>
+          <label class="field">Note
+            <input name="note" maxlength="280" placeholder="Optional">
+          </label>
+        </div>
+      </div>
+      <div class="form-footer"><button class="btn btn-primary" type="submit">Send to review</button></div>
+    </form>
+  </dialog>`;
 }
 
 function completeControl(task, user, csrf, back, prominent = false) {
@@ -390,13 +413,13 @@ function completeControl(task, user, csrf, back, prominent = false) {
 }
 
 function rowStatusActions(task, user, csrf, back, prominent = false) {
-  return `${reviewControl(task, user, csrf, back)}${completeControl(task, user, csrf, back, prominent)}`;
+  return `${reviewControl(task, user, back)}${completeControl(task, user, csrf, back, prominent)}`;
 }
 
 function taskCard(task, today, user, csrf, back) {
   const overdue = isOverdue(task.due_date, task.status, today);
   return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <div class="card-top"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></div>
+    <div class="card-top"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}</div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${esc(task.assignee_name || 'Unassigned')}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
@@ -412,7 +435,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
   const overdue = isOverdue(task.due_date, task.status, today);
   const added = String(highlight || '') === String(task.id);
   return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
+    <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}</td>
     <td>${esc(task.project_name || '—')}</td>
     <td>${assigneeCell(task)}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
@@ -497,7 +520,8 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
       ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board', autofocus: false })}
     </dialog>
     <a class="fab" href="/tasks/new" data-open-drawer aria-label="New task">+</a>
-    ${projectScript(projects)}`;
+    ${projectScript(projects)}
+    ${reviewDialog(csrf)}`;
 
   return layout({
     title: 'Tasks · Sunspec',
@@ -527,7 +551,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
   const meta = !isNew
-    ? `<p class="meta">Created by ${esc(task.creator_name || 'Unknown')} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>`
+    ? `<p class="meta">Created by ${esc(task.creator_name || 'Unknown')} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${esc(task.reviewer_name)}</p>` : ''}`
     : '';
   const pageActions = !isNew
     ? `<div class="title-actions">${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? rowStatusActions(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`
@@ -606,7 +630,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         ${activity.length ? activity.map((item) => `<p class="activity"><strong>${esc(item.actor_name)}</strong> ${esc(item.detail)} <time>${esc(formatDateTime(item.created_at))}</time></p>`).join('') : '<p class="hint">No history yet.</p>'}
       </section>`}
       ${commentBlock}
-      ${projectScript(projects)}`,
+      ${projectScript(projects)}
+      ${isNew ? '' : reviewDialog(csrf)}`,
   });
 }
 

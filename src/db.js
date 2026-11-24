@@ -49,6 +49,7 @@ function migrate(db) {
       priority TEXT CHECK (priority IN ('low', 'med', 'high', 'urgent')),
       due_date TEXT,
       created_by INTEGER NOT NULL REFERENCES users(id),
+      reviewer_id INTEGER REFERENCES users(id),
       completed_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -220,6 +221,9 @@ function migrate(db) {
   const columns = db.prepare('PRAGMA table_info(tasks)').all();
   if (!columns.some((column) => column.name === 'deleted_at')) {
     db.exec('ALTER TABLE tasks ADD COLUMN deleted_at TEXT');
+  }
+  if (!columns.some((column) => column.name === 'reviewer_id')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN reviewer_id INTEGER REFERENCES users(id)');
   }
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
   if (!userColumns.some((column) => column.name === 'is_bot')) {
@@ -473,11 +477,13 @@ export function listTasks(db, filters) {
     SELECT t.*,
       a.name AS assignee_name,
       c.name AS creator_name,
+      r.name AS reviewer_name,
       p.name AS project_name,
       (SELECT COUNT(*) FROM comments cm WHERE cm.task_id = t.id) AS comment_count
     FROM tasks t
     LEFT JOIN users a ON a.id = t.assignee_id
     LEFT JOIN users c ON c.id = t.created_by
+    LEFT JOIN users r ON r.id = t.reviewer_id
     LEFT JOIN projects p ON p.id = t.project_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY
@@ -503,11 +509,13 @@ export function getTask(db, id) {
     SELECT t.*,
       a.name AS assignee_name,
       c.name AS creator_name,
+      r.name AS reviewer_name,
       p.name AS project_name,
       (SELECT COUNT(*) FROM comments cm WHERE cm.task_id = t.id) AS comment_count
     FROM tasks t
     LEFT JOIN users a ON a.id = t.assignee_id
     LEFT JOIN users c ON c.id = t.created_by
+    LEFT JOIN users r ON r.id = t.reviewer_id
     LEFT JOIN projects p ON p.id = t.project_id
     WHERE t.id = ? AND t.deleted_at IS NULL
   `).get(id);
@@ -592,10 +600,13 @@ export function updateTask(db, id, fields) {
   let completedAt = current.completed_at;
   if (fields.status === 'done' && current.status !== 'done') completedAt = now;
   if (fields.status !== 'done') completedAt = null;
+  let reviewerId = current.reviewer_id || null;
+  if (fields.status !== 'review') reviewerId = null;
+  else if (fields.reviewerId !== undefined) reviewerId = fields.reviewerId || null;
   db.prepare(`
     UPDATE tasks
     SET title = ?, description = ?, assignee_id = ?, status = ?, priority = ?, due_date = ?,
-        project_id = ?, completed_at = ?, updated_at = ?
+        project_id = ?, reviewer_id = ?, completed_at = ?, updated_at = ?
     WHERE id = ?
   `).run(
     fields.title,
@@ -605,6 +616,7 @@ export function updateTask(db, id, fields) {
     fields.priority,
     fields.dueDate,
     fields.projectId || null,
+    reviewerId,
     completedAt,
     now,
     id,
@@ -1032,6 +1044,15 @@ export function setTaskMentions(db, taskId, userIds) {
     for (const userId of userIds) insert.run(taskId, userId);
   });
   tx();
+}
+
+export function mentionReviewer(db, { taskId, authorId, reviewer, note }) {
+  const text = String(note || '').trim().slice(0, 280);
+  const body = text ? `@[${reviewer.name}](${reviewer.id}) ${text}` : `@[${reviewer.name}](${reviewer.id})`;
+  const commentId = addComment(db, { taskId, authorId, body });
+  setCommentMentions(db, commentId, [reviewer.id]);
+  notifyMentions(db, { taskId, userIds: [reviewer.id], actorId: authorId });
+  return commentId;
 }
 
 export function notifyMentions(db, { taskId, userIds, actorId }) {

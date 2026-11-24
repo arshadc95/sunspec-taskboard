@@ -152,6 +152,6 @@ Signed-in people download their own chat files, and any PDF on a task they can o
 
 Nginx in front of the app must allow the upload: `client_max_body_size 80m`. Update the file that is actually enabled on the VPS, then reload nginx. The copies in `deploy/` already say 80m.
 
-`POST` and `PATCH` accept `assignee_ids` (an array of user ids) and still accept a single `assignee_id`. `GET` task payloads include `assignee_id`, `assignee_ids`, and `assignees` (`id` and `name`). `PATCH` also accepts `title`, `description`, `status`, `priority`, `due` or `due_date`, and `project` or `project_id`.
+`POST` and `PATCH` accept `assignee_ids` (an array of user ids) and still accept a single `assignee_id`. `GET` task payloads include `assignee_id`, `assignee_ids`, and `assignees` (`id` and `name`). `PATCH` also accepts `title`, `description`, `status`, `priority`, `due` or `due_date`, and `project` or `project_id`. When `status` is `review`, `PATCH` accepts `reviewer_id` (an active user) and an optional `note`. That stores the reviewer, mentions them, and `GET` then includes `reviewer_id` and `reviewer`.
 
 Nginx on `tasks.sunspec.co.za` proxies `/api/bot/` to the app on `127.0.0.1:8082`. The bearer token is the access control.
