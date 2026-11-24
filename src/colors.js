@@ -13,15 +13,30 @@ export const PALETTE = [
   '#6d28d9',
 ];
 
+export function normalizeColor(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return null;
+  const hex = text.startsWith('#') ? text : `#${text}`;
+  return PALETTE.includes(hex) ? hex : null;
+}
+
 export function isPaletteColor(value) {
-  return PALETTE.includes(String(value || '').toLowerCase());
+  return normalizeColor(value) !== null;
+}
+
+export function colorForUser(userId, stored) {
+  const known = normalizeColor(stored);
+  if (known) return known;
+  const id = Number(userId);
+  const index = Number.isFinite(id) ? Math.abs(Math.trunc(id)) % PALETTE.length : 0;
+  return PALETTE[index];
 }
 
 export function nextColor(used = []) {
   const counts = new Map(PALETTE.map((color) => [color, 0]));
   for (const color of used) {
-    const key = String(color || '').toLowerCase();
-    if (counts.has(key)) counts.set(key, counts.get(key) + 1);
+    const key = normalizeColor(color);
+    if (key) counts.set(key, counts.get(key) + 1);
   }
   let choice = PALETTE[0];
   let least = Infinity;

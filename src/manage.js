@@ -1,3 +1,4 @@
+import { colorForUser } from './colors.js';
 import { dateInJohannesburg, shiftDate, todayDate } from './time.js';
 import { coachTips, managerTip } from './coach.js';
 
@@ -100,7 +101,8 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     LEFT JOIN projects p ON p.id = t.project_id
     ${projectId ? 'WHERE t.project_id = ?' : ''}
   `).all(...(projectId ? [projectId] : []));
-  const people = db.prepare('SELECT id, name, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE').all();
+  const people = db.prepare('SELECT id, name, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE').all()
+    .map((person) => ({ ...person, color: colorForUser(person.id, person.color) }));
   const links = db.prepare('SELECT task_id, user_id FROM task_assignees').all();
   const history = db.prepare('SELECT task_id, status, changed_at FROM task_status_history ORDER BY changed_at, id').all();
   const entries = db.prepare(`
@@ -259,7 +261,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
 
   const attention = [];
   for (const task of overdueNow.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))) {
-    const owners = (assignees.get(task.id) || []).map((id) => ({ name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
+    const owners = (assignees.get(task.id) || []).map((id) => ({ id, name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
     attention.push({ id: task.id, title: task.title, owners, note: 'overdue' });
     if (attention.length >= 8) break;
   }
@@ -269,7 +271,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     const entered = [...rows].reverse().find((row) => row.status === 'review');
     const at = Date.parse(entered?.changed_at || task.created_at);
     if (nowMs - at <= 3 * 86400000) continue;
-    const owners = (assignees.get(task.id) || []).map((id) => ({ name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
+    const owners = (assignees.get(task.id) || []).map((id) => ({ id, name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
     attention.push({ id: task.id, title: task.title, owners, note: 'in review more than 3 days' });
   }
   for (const task of openNow.filter((item) => !(assignees.get(item.id) || []).length)) {

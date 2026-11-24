@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { nextColor, PALETTE } from '../src/colors.js';
+import { colorForUser, nextColor, normalizeColor, PALETTE } from '../src/colors.js';
 import { clampMonth, monthSpan } from '../src/manage.js';
 
 test('a past calendar month runs from the 1st to the next 1st in Johannesburg', () => {
@@ -19,6 +19,14 @@ test('this month stops at now', () => {
   assert.equal(span.end, now.getTime() + 1);
   assert.equal(span.current, true);
   assert.equal(span.label, 'Nov 2026');
+});
+
+test('colours are stored as lowercase hex and a bad value falls back by user id', () => {
+  assert.equal(normalizeColor('#1D4ED8'), '#1d4ed8');
+  assert.equal(normalizeColor('1D4ED8'), '#1d4ed8');
+  assert.equal(normalizeColor(' BLUE '), null);
+  assert.equal(colorForUser(3, 'BLUE'), PALETTE[3 % PALETTE.length]);
+  assert.equal(colorForUser(3, '#1D4ED8'), '#1d4ed8');
 });
 
 test('a new user gets the least used colour from the palette', () => {

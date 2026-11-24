@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { nextColor } from './colors.js';
+import { colorForUser, nextColor, normalizeColor } from './colors.js';
 import { hashPassword } from './passwords.js';
 import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, todayDate } from './time.js';
 
@@ -241,15 +241,18 @@ function migrate(db) {
 }
 
 function backfillUserColors(db) {
-  const missing = db.prepare("SELECT id FROM users WHERE color IS NULL OR color = '' ORDER BY id").all();
-  if (!missing.length) return;
-  const used = db.prepare("SELECT color FROM users WHERE color IS NOT NULL AND color != ''").all().map((row) => row.color);
+  const rows = db.prepare('SELECT id, color FROM users ORDER BY id').all();
   const update = db.prepare('UPDATE users SET color = ? WHERE id = ?');
-  for (const row of missing) {
-    const color = nextColor(used);
-    update.run(color, row.id);
-    used.push(color);
+  for (const row of rows) {
+    const color = colorForUser(row.id, row.color);
+    if (color !== row.color) update.run(color, row.id);
   }
+}
+
+function paintUser(row) {
+  if (!row) return row;
+  row.color = colorForUser(row.id, row.color);
+  return row;
 }
 
 function recordStatus(db, taskId, status, changedAt) {
@@ -327,7 +330,7 @@ export function upsertSuperuser(db, { email, password, name }) {
 export function createUser(db, { email, name, password, role }) {
   const now = new Date().toISOString();
   try {
-    const used = db.prepare("SELECT color FROM users WHERE color IS NOT NULL AND color != ''").all().map((row) => row.color);
+    const used = db.prepare('SELECT color FROM users').all().map((row) => row.color);
     const info = db.prepare(`
       INSERT INTO users (email, name, password_hash, role, active, color, created_at, updated_at)
       VALUES (?, ?, ?, ?, 1, ?, ?, ?)
@@ -347,7 +350,8 @@ export function updateUser(db, id, { email, name, role, active, password, color 
       SET email = ?, name = ?, role = ?, active = ?, updated_at = ?
       WHERE id = ?
     `).run(email, name, role, active ? 1 : 0, now, id);
-    if (color) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(color, id);
+    const stored = normalizeColor(color);
+    if (stored) db.prepare('UPDATE users SET color = ? WHERE id = ?').run(stored, id);
   } catch (error) {
     if (String(error.message).includes('UNIQUE')) return { error: 'email' };
     throw error;
@@ -360,11 +364,11 @@ export function updateUser(db, id, { email, name, role, active, password, color 
 }
 
 export function getUser(db, id) {
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null;
+  return paintUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null);
 }
 
 export function getUserByEmail(db, email) {
-  return db.prepare('SELECT * FROM users WHERE email = ?').get(email) || null;
+  return paintUser(db.prepare('SELECT * FROM users WHERE email = ?').get(email) || null);
 }
 
 export function listUsers(db, actor) {
@@ -374,14 +378,14 @@ export function listUsers(db, actor) {
       FROM users
       WHERE role = 'user' AND is_bot = 0
       ORDER BY active DESC, name COLLATE NOCASE
-    `).all();
+    `).all().map(paintUser);
   }
   return db.prepare(`
     SELECT id, email, name, role, active, color, created_at
     FROM users
     WHERE is_bot = 0
     ORDER BY active DESC, CASE role WHEN 'superuser' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, name COLLATE NOCASE
-  `).all();
+  `).all().map(paintUser);
 }
 
 export function listActiveUsers(db) {
@@ -390,7 +394,7 @@ export function listActiveUsers(db) {
     FROM users
     WHERE active = 1 AND is_bot = 0
     ORDER BY name COLLATE NOCASE
-  `).all();
+  `).all().map(paintUser);
 }
 
 export function countOtherActiveSuperusers(db, userId) {
@@ -402,12 +406,12 @@ export function countOtherActiveSuperusers(db, userId) {
 
 export function getSessionUser(db, sessionId) {
   if (!sessionId) return null;
-  return db.prepare(`
+  return paintUser(db.prepare(`
     SELECT u.*
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.id = ? AND s.expires_at > ? AND u.active = 1
-  `).get(sessionId, Date.now()) || null;
+  `).get(sessionId, Date.now()) || null);
 }
 
 export function createSession(db, userId, sessionId, expiresAt) {
@@ -496,6 +500,7 @@ export function listTasks(db, filters) {
   const sql = `
     SELECT t.*,
       a.name AS assignee_name,
+      a.color AS assignee_color,
       c.name AS creator_name,
       c.color AS creator_color,
       r.name AS reviewer_name,
@@ -530,6 +535,7 @@ export function getTask(db, id) {
   const task = db.prepare(`
     SELECT t.*,
       a.name AS assignee_name,
+      a.color AS assignee_color,
       c.name AS creator_name,
       c.color AS creator_color,
       r.name AS reviewer_name,
@@ -603,11 +609,14 @@ function attachAssignees(db, rows) {
   const byTask = new Map();
   for (const link of links) {
     if (!byTask.has(link.task_id)) byTask.set(link.task_id, []);
-    byTask.get(link.task_id).push({ id: link.id, name: link.name, color: link.color });
+    byTask.get(link.task_id).push(paintUser({ id: link.id, name: link.name, color: link.color }));
   }
   return rows.map((row) => {
     const people = byTask.get(row.id) || [];
     const names = people.map((person) => person.name).join(', ');
+    if (row.created_by) row.creator_color = colorForUser(row.created_by, row.creator_color);
+    if (row.reviewer_id) row.reviewer_color = colorForUser(row.reviewer_id, row.reviewer_color);
+    if (row.assignee_id) row.assignee_color = colorForUser(row.assignee_id, row.assignee_color);
     return {
       ...row,
       assignees: people,
@@ -679,7 +688,10 @@ export function listComments(db, taskId) {
     JOIN users u ON u.id = c.author_id
     WHERE c.task_id = ?
     ORDER BY c.created_at ASC, c.id ASC
-  `).all(taskId);
+  `).all(taskId).map((row) => {
+    row.author_color = colorForUser(row.author_id, row.author_color);
+    return row;
+  });
 }
 
 export function getComment(db, id) {
@@ -924,13 +936,16 @@ export function managementReport(db, filters) {
 
 export function listRunningTimers(db) {
   return db.prepare(`
-    SELECT te.*, u.name AS user_name, t.title AS task_title
+    SELECT te.*, u.name AS user_name, u.color AS color, t.title AS task_title
     FROM time_entries te
     JOIN users u ON u.id = te.user_id
     JOIN tasks t ON t.id = te.task_id
     WHERE te.ended_at IS NULL
     ORDER BY te.started_at ASC
-  `).all();
+  `).all().map((row) => {
+    row.color = colorForUser(row.user_id, row.color);
+    return row;
+  });
 }
 
 export function getRunningTimer(db, userId) {
@@ -979,7 +994,10 @@ export function listTimeEntries(db, taskId) {
     JOIN users u ON u.id = te.user_id
     WHERE te.task_id = ?
     ORDER BY te.started_at DESC, te.id DESC
-  `).all(taskId);
+  `).all(taskId).map((row) => {
+    row.color = colorForUser(row.user_id, row.color);
+    return row;
+  });
 }
 
 export function timeTotals(db, now = Date.now()) {
@@ -1223,7 +1241,7 @@ export function teamBoard(db, now = Date.now()) {
     return {
       id: person.id,
       name: person.name,
-      color: person.color,
+      color: colorForUser(person.id, person.color),
       weekCount,
       monthCount,
       weekHours: hoursFrom(userEntries, weekIso, now),
@@ -1239,15 +1257,18 @@ const GROK_EMAIL = 'grok@taskboard.local';
 export function ensureGrokUser(db) {
   const existing = getUserByEmail(db, GROK_EMAIL);
   if (existing) {
-    db.prepare("UPDATE users SET name = 'Grok', role = 'user', active = 0, is_bot = 1 WHERE id = ?").run(existing.id);
+    db.prepare("UPDATE users SET name = 'Grok', role = 'user', active = 0, is_bot = 1, color = ? WHERE id = ?")
+      .run(colorForUser(existing.id, existing.color), existing.id);
     return getUser(db, existing.id);
   }
   const now = new Date().toISOString();
   const info = db.prepare(`
-    INSERT INTO users (email, name, password_hash, role, active, is_bot, created_at, updated_at)
-    VALUES (?, 'Grok', ?, 'user', 0, 1, ?, ?)
-  `).run(GROK_EMAIL, hashPassword(`${now}-${Math.random()}`), now, now);
-  return getUser(db, Number(info.lastInsertRowid));
+    INSERT INTO users (email, name, password_hash, role, active, is_bot, color, created_at, updated_at)
+    VALUES (?, 'Grok', ?, 'user', 0, 1, ?, ?, ?)
+  `).run(GROK_EMAIL, hashPassword(`${now}-${Math.random()}`), '#1d4ed8', now, now);
+  const id = Number(info.lastInsertRowid);
+  db.prepare('UPDATE users SET color = ? WHERE id = ?').run(colorForUser(id, null), id);
+  return getUser(db, id);
 }
 
 export function listGrokThreads(db, userId) {

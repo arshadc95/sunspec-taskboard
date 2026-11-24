@@ -3,6 +3,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import Database from 'better-sqlite3';
+import { PALETTE } from '../src/colors.js';
+import { openDatabase } from '../src/db.js';
+import { hashPassword } from '../src/passwords.js';
 import { createApp } from '../src/server.js';
 import { todayDate } from '../src/time.js';
 
@@ -190,5 +194,89 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();
+  }
+});
+
+test('an old database without colours still shows dots', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-old-color-'));
+  const file = path.join(dir, 'old.sqlite');
+  const now = new Date().toISOString();
+  const due = todayDate();
+  const raw = new Database(file);
+  raw.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE tasks (
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      assignee_id INTEGER,
+      status TEXT NOT NULL,
+      priority TEXT,
+      due_date TEXT,
+      created_by INTEGER NOT NULL,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  raw.prepare(`
+    INSERT INTO users (email, name, password_hash, role, active, created_at, updated_at)
+    VALUES ('lindi@example.com', 'Lindi Nkosi', ?, 'superuser', 1, ?, ?)
+  `).run(hashPassword('old-password'), now, now);
+  raw.prepare(`
+    INSERT INTO tasks (title, description, assignee_id, status, priority, due_date, created_by, created_at, updated_at)
+    VALUES ('Roof check', '', 1, 'todo', '', ?, 1, ?, ?)
+  `).run(due, now, now);
+  raw.close();
+
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: file,
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const stored = db.prepare("SELECT id, color FROM users WHERE email = 'lindi@example.com'").get();
+    assert.equal(stored.color, PALETTE[stored.id % PALETTE.length]);
+    const session = await login(base, 'lindi@example.com', 'old-password');
+    assert.equal(session.res.status, 302);
+    const home = await page(base, session.cookies, '/');
+    assert.match(home.text, /class="who"[\s\S]*class="swatch"[\s\S]*who-name">Lindi Nkosi/);
+    assert.match(home.text, /<th>Assignee<\/th>[\s\S]*class="swatch"[\s\S]*Lindi Nkosi/);
+    const calendar = await page(base, session.cookies, '/calendar');
+    assert.match(calendar.text, /class="chip[^"]*"[\s\S]*class="swatch"[\s\S]*Roof check/);
+
+    db.prepare("UPDATE users SET color = 'BLUE' WHERE email = 'lindi@example.com'").run();
+    const again = await page(base, session.cookies, '/');
+    assert.match(again.text, /class="who"[\s\S]*class="swatch"[\s\S]*who-name">Lindi Nkosi/);
+    assert.match(again.text, /class="swatch"[\s\S]*Lindi Nkosi/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
+
+  const reopened = openDatabase(file);
+  try {
+    const fixed = reopened.prepare("SELECT id, color FROM users WHERE email = 'lindi@example.com'").get();
+    assert.equal(fixed.color, PALETTE[fixed.id % PALETTE.length]);
+    assert.equal(fixed.color, fixed.color.toLowerCase());
+  } finally {
+    reopened.close();
   }
 });
