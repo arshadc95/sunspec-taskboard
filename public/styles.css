@@ -661,7 +661,8 @@ dialog.drawer[open] { display: flex; flex-direction: column; }
 .chip.done { background: #eee; color: #777; }
 .cal-agenda { display: none; }
 .done-toggle { background: none; border: 0; font: inherit; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; padding: 0; }
-.row-timer, .row-complete, .kudos { display: inline; }
+.row-timer, .row-review, .row-complete, .kudos { display: inline; }
+.btn-tiny.review, .btn-tiny.complete { width: 28px; height: 28px; padding: 0; }
 .row-actions .btn { vertical-align: middle; }
 .confetti { position: fixed; inset: 0; pointer-events: none; z-index: 70; overflow: hidden; }
 .confetti i { position: absolute; top: -8px; width: 8px; height: 10px; animation: fall 900ms linear forwards; }

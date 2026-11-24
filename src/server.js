@@ -615,6 +615,28 @@ export function createApp(config) {
     res.redirect(timerReturn(req, task.id, 'stopped'));
   });
 
+  app.post('/tasks/:id/review', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canCompleteTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (task.status !== 'review' && task.status !== 'done') {
+      const updated = updateTask(db, task.id, {
+        title: task.title,
+        description: task.description,
+        assigneeId: task.assignee_id,
+        status: 'review',
+        priority: task.priority,
+        dueDate: task.due_date,
+        projectId: task.project_id,
+      });
+      logTaskChanges(db, req.user, task, updated);
+      addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Sent the task to review' });
+    }
+    res.redirect(safeNext(String(req.body.back || '/')));
+  });
+
   app.post('/tasks/:id/complete', requireUser, (req, res) => {
     if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
     const id = numericId(req.params.id);

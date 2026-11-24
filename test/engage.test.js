@@ -103,6 +103,18 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.match(board.text, /My day/);
     assert.doesNotMatch(board.text, />Apply</);
     assert.doesNotMatch(board.text, /timer\/start/);
+    assert.match(board.text, /title="Send to review"/);
+    assert.match(board.text, new RegExp(`/tasks/${taskId}/review`));
+    const reviewed = await post(base, thabang, `/tasks/${taskId}/review`, { _csrf: opened.csrf, back: '/' });
+    assert.equal(reviewed.status, 302);
+    assert.equal(db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId).status, 'review');
+    assert.deepEqual(
+      db.prepare('SELECT status FROM task_status_history WHERE task_id = ? ORDER BY id').all(taskId).map((row) => row.status),
+      ['todo', 'review'],
+    );
+    const inReview = await page(base, thabang, '/');
+    assert.match(inReview.text, /Review <span class="group-count">1<\/span>/);
+    assert.doesNotMatch(inReview.text, new RegExp(`/tasks/${taskId}/review`));
     const stranger = await post(base, admin, `/tasks/${taskId}/timer/start`, { _csrf: users.csrf });
     assert.equal(stranger.status, 403);
     const started = await post(base, thabang, `/tasks/${taskId}/timer/start`, { _csrf: opened.csrf, return: 'board', back: '/' });

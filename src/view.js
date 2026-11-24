@@ -364,13 +364,33 @@ function removeControl(task, user, csrf, back, prominent = false) {
   </form>`;
 }
 
+function canQuickStatus(user, task) {
+  if (!user || !task) return false;
+  if (user.role === 'superuser' || user.role === 'admin') return true;
+  if (task.created_by === user.id || task.assignee_id === user.id) return true;
+  return Array.isArray(task.assignee_ids) && task.assignee_ids.includes(user.id);
+}
+
+function reviewControl(task, user, csrf, back) {
+  if (task.status === 'review' || task.status === 'done' || !canQuickStatus(user, task)) return '';
+  return `<form class="row-review" method="post" action="/tasks/${task.id}/review">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <input type="hidden" name="back" value="${esc(back)}">
+    <button class="btn btn-tiny review" type="submit" title="Send to review" aria-label="Send to review">R</button>
+  </form>`;
+}
+
 function completeControl(task, user, csrf, back, prominent = false) {
-  if (task.status === 'done' || !(user.role === 'superuser' || user.role === 'admin' || task.created_by === user.id || task.assignee_id === user.id)) return '';
+  if (task.status === 'done' || !canQuickStatus(user, task)) return '';
   return `<form class="row-complete" method="post" action="/tasks/${task.id}/complete">
     <input type="hidden" name="_csrf" value="${esc(csrf)}">
     <input type="hidden" name="back" value="${esc(back)}">
     <button class="btn ${prominent ? 'btn-primary' : 'btn-tiny complete'}" type="submit" title="Mark done">${prominent ? '✓ Complete' : '✓'}</button>
   </form>`;
+}
+
+function rowStatusActions(task, user, csrf, back, prominent = false) {
+  return `${reviewControl(task, user, csrf, back)}${completeControl(task, user, csrf, back, prominent)}`;
 }
 
 function taskCard(task, today, user, csrf, back) {
@@ -384,7 +404,7 @@ function taskCard(task, today, user, csrf, back) {
       <span class="due">${esc(formatDue(task.due_date))}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
-    <div class="card-actions">${completeControl(task, user, csrf, back)}</div>
+    <div class="card-actions">${rowStatusActions(task, user, csrf, back)}</div>
   </article>`;
 }
 
@@ -400,7 +420,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     <td class="due">${esc(formatDue(task.due_date))}</td>
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
-    <td class="row-actions">${completeControl(task, user, csrf, back)}</td>
+    <td class="row-actions">${rowStatusActions(task, user, csrf, back)}</td>
   </tr>`;
 }
 
@@ -510,7 +530,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     ? `<p class="meta">Created by ${esc(task.creator_name || 'Unknown')} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>`
     : '';
   const pageActions = !isNew
-    ? `<div class="title-actions">${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? completeControl(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`
+    ? `<div class="title-actions">${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? rowStatusActions(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`
     : '';
   const commentBlock = isNew
     ? ''
