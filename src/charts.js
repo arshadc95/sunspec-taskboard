@@ -216,21 +216,46 @@ export function backlogChart(points) {
 
 export function heatMap(heatmap) {
   const rows = heatmap?.rows || [];
-  const weeks = heatmap?.weeks || [];
-  if (!rows.length || !weeks.length) return '';
-  const cell = 22;
+  const days = heatmap?.days || [];
+  if (!rows.length || !days.length) return '';
+  const cell = 24;
   const label = 124;
-  const w = label + weeks.length * cell;
-  const h = 18 + rows.length * cell;
+  const head = 34;
+  const w = label + days.length * cell + 8;
+  const h = head + rows.length * cell + 6;
   const max = heatmap.max || 1;
-  let body = weeks.map((week, index) => `<text x="${label + index * cell + 2}" y="12" font-size="9" fill="#555">${esc(week)}</text>`).join('');
+  const hatch = `<defs><pattern id="workload-future" width="6" height="6" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="#f3f4f6"/><path d="M0 6 L6 0" stroke="#d1d5db" stroke-width="1"/></pattern></defs>`;
+  let body = hatch;
+  days.forEach((day, index) => {
+    const x = label + index * cell;
+    if (day.weekend) body += `<rect class="weekend" x="${x}" y="0" width="${cell - 2}" height="${h}" fill="#eef0f2"/>`;
+    if (day.today) body += `<rect class="today" x="${x - 1}" y="1" width="${cell}" height="${head - 4}" fill="none" stroke="#111" stroke-width="1.5"/>`;
+    body += `<text x="${x + 2}" y="14" font-size="9" fill="${day.future ? '#9ca3af' : '#111'}" font-family="Inter, sans-serif"${day.today ? ' font-weight="700"' : ''}>${esc(day.label)}</text>`;
+    body += `<text x="${x + 6}" y="26" font-size="8" fill="${day.future ? '#9ca3af' : '#555'}" font-family="Inter, sans-serif">${esc(day.weekday)}</text>`;
+  });
   rows.forEach((row, rowIndex) => {
-    if (isPaletteColor(row.color)) body += `<circle cx="3" cy="${22 + rowIndex * cell + 8}" r="3" fill="${row.color}"/>`;
-    body += `<text x="10" y="${22 + rowIndex * cell + 12}" font-size="10" fill="#111">${esc(row.name)}</text>`;
-    row.cells.forEach((count, index) => {
-      const shade = count ? 0.15 + 0.85 * (count / max) : 0.06;
-      body += `<rect x="${label + index * cell}" y="${18 + rowIndex * cell}" width="${cell - 2}" height="${cell - 2}" fill="#f97316" opacity="${shade.toFixed(2)}"><title>${esc(row.name)} ${count}</title></rect>`;
+    const y = head + rowIndex * cell;
+    if (isPaletteColor(row.color)) body += `<circle cx="8" cy="${y + 10}" r="3" fill="${row.color}"/>`;
+    body += `<text x="16" y="${y + 14}" font-size="10" fill="#111" font-family="Inter, sans-serif">${esc(row.name)}</text>`;
+    row.cells.forEach((cellValue, index) => {
+      const day = days[index];
+      const open = cellValue?.open || 0;
+      const done = cellValue?.done || 0;
+      const x = label + index * cell;
+      const title = `${row.name}, ${day.when}: ${open} open, ${done} done`;
+      let fill = '#f8fafc';
+      let opacity = 1;
+      if (day.future) fill = 'url(#workload-future)';
+      else if (!open && day.weekend) fill = '#e5e7eb';
+      else {
+        fill = '#1e3a8a';
+        opacity = open ? 0.18 + 0.82 * (open / max) : 0.08;
+      }
+      body += `<rect x="${x}" y="${y}" width="${cell - 3}" height="${cell - 3}" fill="${fill}" opacity="${opacity.toFixed(2)}"><title>${esc(title)}</title></rect>`;
+      if (!day.future && done > 0) {
+        body += `<circle cx="${x + (cell - 3) / 2}" cy="${y + (cell - 3) / 2}" r="4" fill="#f97316"><title>${esc(title)}</title></circle>`;
+      }
     });
   });
-  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Tasks completed by person over 8 weeks">${body}</svg>`;
+  return `<svg class="chart workload" viewBox="0 0 ${w} ${h}" role="img" aria-label="Open tasks and finished tasks by person">${body}</svg>`;
 }

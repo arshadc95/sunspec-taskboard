@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { backlogChart, stackedArea, throughputChart } from '../src/charts.js';
+import { backlogChart, heatMap, stackedArea, throughputChart } from '../src/charts.js';
 import { COLOR_NAMES, colorForUser, colorsToStore, nextColor, normalizeColor, PALETTE } from '../src/colors.js';
 import { createTask, createUser, openDatabase } from '../src/db.js';
 import { buildManage, clampMonth, monthSpan, taskStatusAt } from '../src/manage.js';
@@ -126,6 +126,61 @@ test('status, open, and created charts cover the month up to today without a las
   assert.equal(board.backlog[onToday].open, 2);
   assert.equal(board.throughput.find((row) => row.label === '11-02').created, 2);
   assert.equal(board.throughput.find((row) => row.label === '11-24').created, 0);
+});
+
+test('the workload grid shows the whole month, weekdays, open load, and finished days', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-heat-'));
+  const db = openDatabase(path.join(dir, 'board.sqlite'));
+  const sam = createUser(db, { email: 'sam@example.com', name: 'Sam Cole', password: 'password1', role: 'user' });
+  const kept = createTask(db, {
+    title: 'Still open',
+    description: '',
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
+    status: 'todo',
+    priority: null,
+    dueDate: '2026-11-28',
+    projectId: null,
+    createdBy: sam.id,
+  });
+  const finished = createTask(db, {
+    title: 'Finished',
+    description: '',
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
+    status: 'done',
+    priority: null,
+    dueDate: '2026-11-10',
+    projectId: null,
+    createdBy: sam.id,
+  });
+  db.prepare('UPDATE tasks SET created_at = ? WHERE id IN (?, ?)').run('2026-11-02T08:00:00+02:00', kept, finished);
+  db.prepare('UPDATE tasks SET completed_at = ?, status = ? WHERE id = ?').run('2026-11-10T10:00:00+02:00', 'done', finished);
+  db.prepare('DELETE FROM task_status_history').run();
+  const now = new Date('2026-11-24T15:00:00+02:00');
+  const board = buildManage(db, { now, month: '2026-11' });
+  db.close();
+  assert.equal(board.heatmap.days.length, 30);
+  assert.equal(board.heatmap.days[0].label, '01');
+  assert.equal(board.heatmap.days[0].weekday, 'S');
+  assert.equal(board.heatmap.days[0].weekend, true);
+  assert.equal(board.heatmap.days[23].today, true);
+  assert.equal(board.heatmap.days[23].weekday, 'T');
+  assert.equal(board.heatmap.days[23].when, 'Tue 24 Nov');
+  assert.equal(board.heatmap.days[24].future, true);
+  const row = board.heatmap.rows.find((item) => item.name === 'Sam Cole');
+  assert.equal(row.cells[1].open, 2);
+  assert.equal(row.cells[9].done, 1);
+  assert.equal(row.cells[9].open, 1);
+  assert.equal(row.cells[23].open, 1);
+  assert.equal(row.cells[23].done, 0);
+  const svg = heatMap(board.heatmap);
+  assert.match(svg, /Sam Cole, Tue 24 Nov: 1 open, 0 done/);
+  assert.match(svg, /class="weekend"/);
+  assert.match(svg, /class="today"/);
+  assert.match(svg, /#1e3a8a/);
+  assert.match(svg, /#f97316/);
+  assert.match(svg, /workload-future/);
 });
 
 test('one day of status data is a stacked bar, and a full month uses daily bars', () => {

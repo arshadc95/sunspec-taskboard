@@ -248,14 +248,50 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
   const sortedCycles = [...cycles].sort((a, b) => a - b);
   const p85 = round1(percentile(sortedCycles, 0.85));
 
-  const heatWeeks = slots.map((slot) => slot.label.slice(3));
+  const weekdayName = (ymd) => {
+    const [year, month, day] = ymd.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day, 10));
+    return new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Johannesburg', weekday: 'short' }).format(date);
+  };
+  const monthName = (ymd) => {
+    const [year, month, day] = ymd.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day, 10));
+    return new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Johannesburg', month: 'short' }).format(date);
+  };
+  const letters = { Mon: 'M', Tue: 'T', Wed: 'W', Thu: 'T', Fri: 'F', Sat: 'S', Sun: 'S' };
+  const [heatYear, heatMonth] = picked.ym.split('-').map(Number);
+  const heatLength = new Date(Date.UTC(heatYear, heatMonth, 0)).getUTCDate();
+  const heatDays = [];
+  for (let day = 1; day <= heatLength; day += 1) {
+    const ymd = `${picked.ym}-${String(day).padStart(2, '0')}`;
+    const name = weekdayName(ymd);
+    heatDays.push({
+      label: String(day).padStart(2, '0'),
+      weekday: letters[name] || '',
+      weekend: name === 'Sat' || name === 'Sun',
+      future: ymd > today,
+      today: ymd === today,
+      when: `${name} ${day} ${monthName(ymd)}`,
+    });
+  }
   const heatRows = sortedPeople.map((person) => ({ name: person.name, color: person.color, cells: [] }));
   let heatMax = 1;
-  slots.forEach((slot, slotIndex) => {
+  heatDays.forEach((day, dayIndex) => {
+    const ymd = `${picked.ym}-${day.label}`;
+    const endMs = Date.parse(`${shiftDate(ymd, 1)}T00:00:00+02:00`) - 1;
     sortedPeople.forEach((person, index) => {
-      const count = live.filter((task) => task.status === 'done' && task.completed_at && Date.parse(task.completed_at) >= slot.from && Date.parse(task.completed_at) < slot.to && (assignees.get(task.id) || []).includes(person.id)).length;
-      heatRows[index].cells[slotIndex] = count;
-      if (count > heatMax) heatMax = count;
+      if (day.future) {
+        heatRows[index].cells[dayIndex] = { open: 0, done: 0 };
+        return;
+      }
+      const open = tasks.filter((task) => {
+        if (!(assignees.get(task.id) || []).includes(person.id)) return false;
+        const status = taskStatusAt(task, hist.get(task.id) || [], endMs);
+        return status && status !== 'done';
+      }).length;
+      const done = live.filter((task) => task.completed_at && dateInJohannesburg(task.completed_at) === ymd && (assignees.get(task.id) || []).includes(person.id)).length;
+      heatRows[index].cells[dayIndex] = { open, done };
+      if (open > heatMax) heatMax = open;
     });
   });
 
@@ -398,7 +434,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     throughput,
     cfd,
     cycle: { p85, points },
-    heatmap: { weeks: heatWeeks, rows: heatRows, max: heatMax },
+    heatmap: { days: heatDays, rows: heatRows, max: heatMax },
     backlog,
     attention: attention.slice(0, 12),
     projects: projectRows,

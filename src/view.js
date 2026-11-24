@@ -892,7 +892,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
       ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>
-    ${manageCard('Workload', 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
+    ${manageCard('Workload', 'Darker = more open tasks that day. Orange = finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No open work in this period.</p>'}</div>`)}
     ${manageCard('Month by month', 'Created, finished, and still late at the end of each month.', `<div class="table-wrap"><table class="grid">
       <thead><tr><th>Month</th><th class="num">Created</th><th class="num">Done</th><th class="num">Overdue</th><th class="num">Avg days to finish</th></tr></thead>
       <tbody>${(board.monthRows || []).map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.created}</td><td class="num">${row.done}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.avg == null ? '—' : row.avg}</td></tr>`).join('')}</tbody>
