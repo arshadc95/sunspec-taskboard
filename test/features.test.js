@@ -97,6 +97,8 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
       assert.match(listed.text, new RegExp(`form="user-${person.id}" type="radio" name="color" value="${person.color}" checked`));
     }
     assert.doesNotMatch(listed.text, / style=/);
+    assert.match(listed.text, /M16 21v-2a4 4 0 0 0-4-4H6/);
+    assert.doesNotMatch(listed.text, /width="12" height="12"/);
     assert.match(listed.text, /class="swatch c-\d+" title="Lindi Nkosi"/);
     assert.match(listed.text, /title="Red"/);
     assert.match(listed.text, /title="Yellow"/);

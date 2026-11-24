@@ -124,8 +124,12 @@ function navLink(href, icon, label, active, badge = 0) {
   return `<a class="nav-link${active === icon ? ' active' : ''}" href="${href}" title="${esc(label)}" aria-label="${esc(label)}">${ICONS[icon]}${count}<span class="nav-label">${esc(label)}</span></a>`;
 }
 
-function sheet(title, inner, flush = false) {
-  return `<section class="sheet"><header class="sheet-title"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>${esc(title)}</span></header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
+function sheetIcon(name) {
+  return ICONS[name] || ICONS.tasks;
+}
+
+function sheet(title, inner, flush = false, icon = 'tasks') {
+  return `<section class="sheet"><header class="sheet-title">${sheetIcon(icon)}<span>${esc(title)}</span></header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
 }
 
 function peopleScript(users) {
@@ -659,7 +663,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const tasksBody = `${filtersHtml}${openGroups.length || doneRows.length ? table : '<p class="empty">No tasks match these filters.</p>'}`;
   const body = `
     ${myDayHtml}
-    ${sheet('Tasks', tasksBody, true)}
+    ${sheet(filters.mentions ? 'Mentions' : 'Tasks', tasksBody, true, filters.mentions ? 'at' : 'tasks')}
       <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
       <div class="drawer-bar"><h2>New task</h2><button type="button" class="drawer-close" data-close-drawer aria-label="Close">×</button></div>
       ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board', autofocus: false })}
@@ -862,7 +866,7 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
             <td>${esc(formatDateTime(task.deleted_at))}</td>
             <td><form method="post" action="/tasks/${task.id}/restore"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn" type="submit">Restore</button></form></td>
           </tr>`).join('')}
-        </tbody></table>` : '<p class="hint">No removed tasks.</p>'}` : ''}`, true)}`;
+        </tbody></table>` : '<p class="hint">No removed tasks.</p>'}` : ''}`, true, 'users')}`;
 
   return layout({
     title: 'Users · Sunspec',
@@ -923,7 +927,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
   const body = `
     <section class="sheet">
       <header class="sheet-title">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        ${sheetIcon('chart')}
         <span>Manage</span>
         <form class="manage-switch" method="get" action="/manage" data-live>
           <select name="project" aria-label="Project">${options((projects || []).map((project) => [String(project.id), project.name]), board.projectId || '', 'All projects')}</select>
@@ -1149,7 +1153,7 @@ function teamCard(row) {
 
 export function renderTeam({ user, csrf, rows }) {
   const body = `
-    ${sheet('Team', rows.length ? `<div class="team-grid">${rows.map((row) => teamCard(row)).join('')}</div>` : '<p class="hint">No active people yet.</p>')}`;
+    ${sheet('Team', rows.length ? `<div class="team-grid">${rows.map((row) => teamCard(row)).join('')}</div>` : '<p class="hint">No active people yet.</p>', false, 'team')}`;
   return layout({
     title: 'Team · Sunspec',
     user,
