@@ -114,7 +114,7 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
     LEFT JOIN projects p ON p.id = t.project_id
     ${projectId ? 'WHERE t.project_id = ?' : ''}
   `).all(...(projectId ? [projectId] : []));
-  const people = db.prepare('SELECT id, name, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE').all()
+  const people = db.prepare('SELECT id, name, role, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE').all()
     .map((person) => ({ ...person, color: colorForUser(person.id, person.color) }));
   const links = db.prepare('SELECT task_id, user_id FROM task_assignees').all();
   const history = db.prepare('SELECT task_id, status, changed_at FROM task_status_history ORDER BY changed_at, id').all();
@@ -309,11 +309,12 @@ export function buildManage(db, { projectId = null, month = null, sort = 'name',
   }
   const openScope = live.filter((task) => Date.parse(task.created_at) <= asOfMs && statusAt(task) !== 'done');
   const ownersOf = (task) => assignees.get(task.id) || [];
-  const tipPeople = people.map((person) => {
+  const tipPeople = people.filter((person) => person.role === 'user' || person.role === 'admin').map((person) => {
     const mine = openScope.filter((task) => ownersOf(task).includes(person.id));
     return {
       id: person.id,
       name: person.name,
+      role: person.role,
       open: mine.length,
       overdue: mine.filter((task) => task.due_date && task.due_date < asOf).length,
     };

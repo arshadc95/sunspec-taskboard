@@ -24,33 +24,33 @@ test('workload imbalance names who is heavy and who has space', () => {
     open: 5,
     viewerId: 1,
     people: [
-      { id: 1, name: 'Arshad Chengadu', open: 5, overdue: 0 },
-      { id: 2, name: 'Duncan Moss', open: 0, overdue: 0 },
-      { id: 3, name: 'Jaime Botha', open: 0, overdue: 0 },
+      { id: 1, name: 'Sam Cole', role: 'admin', open: 5, overdue: 0 },
+      { id: 2, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
+      { id: 3, name: 'Jordan Blake', role: 'user', open: 0, overdue: 0 },
     ],
   };
   const tip = one(facts, 'balance');
-  assert.equal(tip.text, 'Arshad has 5 open, Duncan and Jaime have 0. Consider shifting some work to them.');
-  assert.doesNotMatch(tip.text, /\byou\b|Chengadu|Moss|Botha/i);
+  assert.equal(tip.text, 'Sam has 5 open, Alex and Jordan have 0. Consider shifting some work to them.');
+  assert.doesNotMatch(tip.text, /\byou\b|Cole|Kim|Blake/i);
   assert.equal(one({
     open: 5,
     people: [
-      { id: 1, name: 'Arshad Chengadu', open: 5, overdue: 0 },
-      { id: 2, name: 'Duncan Moss', open: 0, overdue: 0 },
+      { id: 1, name: 'Sam Cole', role: 'admin', open: 5, overdue: 0 },
+      { id: 2, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
     ],
-  }, 'balance').text, 'Arshad has 5 open, Duncan has 0. Consider shifting some work to Duncan.');
+  }, 'balance').text, 'Sam has 5 open, Alex has 0. Consider shifting some work to Alex.');
   assert.equal(coachTips({
     open: 8,
     people: [
-      { id: 1, name: 'Arshad Chengadu', open: 4, overdue: 0 },
-      { id: 2, name: 'Lindi Nkosi', open: 4, overdue: 0 },
+      { id: 1, name: 'Sam Cole', role: 'admin', open: 4, overdue: 0 },
+      { id: 2, name: 'Alex Kim', role: 'user', open: 4, overdue: 0 },
     ],
   }).some((item) => item.id === 'balance'), false);
   assert.equal(coachTips({
     open: 2,
     people: [
-      { id: 1, name: 'Arshad Chengadu', open: 2, overdue: 0 },
-      { id: 2, name: 'Duncan Moss', open: 0, overdue: 0 },
+      { id: 1, name: 'Sam Cole', role: 'admin', open: 2, overdue: 0 },
+      { id: 2, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
     ],
   }).some((item) => item.id === 'balance'), false);
 });
@@ -64,14 +64,14 @@ test('unassigned tasks tell the manager to assign them', () => {
 test('overdue work is listed per person', () => {
   const tip = one({
     people: [
-      { id: 1, name: 'Duncan Moss', open: 2, overdue: 1 },
-      { id: 2, name: 'Arshad Chengadu', open: 4, overdue: 3 },
-      { id: 3, name: 'Jaime Botha', open: 1, overdue: 0 },
+      { id: 1, name: 'Alex Kim', role: 'user', open: 2, overdue: 1 },
+      { id: 2, name: 'Sam Cole', role: 'admin', open: 4, overdue: 3 },
+      { id: 3, name: 'Jordan Blake', role: 'user', open: 1, overdue: 0 },
     ],
   }, 'overdue');
-  assert.equal(tip.text, 'Arshad has 3 overdue, Duncan has 1 overdue.');
+  assert.equal(tip.text, 'Sam has 3 overdue, Alex has 1 overdue.');
   assert.equal(coachTips({
-    people: [{ id: 1, name: 'Duncan Moss', open: 2, overdue: 0 }],
+    people: [{ id: 1, name: 'Alex Kim', role: 'user', open: 2, overdue: 0 }],
   }).some((item) => item.id === 'overdue'), false);
 });
 
@@ -100,17 +100,17 @@ test('people with nothing open are offered work', () => {
   const tip = one({
     open: 2,
     people: [
-      { id: 1, name: 'Arshad Chengadu', open: 2, overdue: 0 },
-      { id: 2, name: 'Duncan Moss', open: 0, overdue: 0 },
-      { id: 3, name: 'Jaime Botha', open: 0, overdue: 0 },
+      { id: 1, name: 'Sam Cole', role: 'admin', open: 2, overdue: 0 },
+      { id: 2, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
+      { id: 3, name: 'Jordan Blake', role: 'user', open: 0, overdue: 0 },
     ],
   }, 'idle');
-  assert.equal(tip.text, 'Duncan and Jaime have nothing open, give them work.');
+  assert.equal(tip.text, 'Alex and Jordan have nothing open, give them work.');
   assert.equal(coachTips({
     open: 0,
     people: [
-      { id: 1, name: 'Duncan Moss', open: 0, overdue: 0 },
-      { id: 2, name: 'Jaime Botha', open: 0, overdue: 0 },
+      { id: 1, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
+      { id: 2, name: 'Jordan Blake', role: 'user', open: 0, overdue: 0 },
     ],
   }).some((item) => item.id === 'idle'), false);
 });
@@ -127,13 +127,13 @@ test('review waiting is mentioned only when review is in use', () => {
 test('a project with a pile of open tasks and no recent assignment is flagged', () => {
   const tip = one({
     projects: [
-      { id: 4, name: 'Tubecon', open: 8, assignedRecently: false },
+      { id: 4, name: 'Site A', open: 8, assignedRecently: false },
       { id: 5, name: 'Quiet site', open: 2, assignedRecently: false },
       { id: 6, name: 'Live site', open: 9, assignedRecently: true },
     ],
     people: [],
   }, 'project');
-  assert.equal(tip.text, 'Tubecon has 8 open tasks and nobody has been assigned there this month.');
+  assert.equal(tip.text, 'Site A has 8 open tasks and nobody has been assigned there this month.');
   assert.equal(coachTips({
     projects: [{ id: 6, name: 'Live site', open: 9, assignedRecently: true }],
     people: [],
@@ -150,11 +150,11 @@ test('tips stay a short list and the important ones come first', () => {
     reviewWaiting: 2,
     noDue: 4,
     people: [
-      { id: 1, name: 'Arshad Chengadu', open: 5, overdue: 2 },
-      { id: 2, name: 'Duncan Moss', open: 0, overdue: 0 },
-      { id: 3, name: 'Jaime Botha', open: 0, overdue: 0 },
+      { id: 1, name: 'Sam Cole', role: 'admin', open: 5, overdue: 2 },
+      { id: 2, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
+      { id: 3, name: 'Jordan Blake', role: 'user', open: 0, overdue: 0 },
     ],
-    projects: [{ id: 4, name: 'Tubecon', open: 8, assignedRecently: false }],
+    projects: [{ id: 4, name: 'Site A', open: 8, assignedRecently: false }],
   });
   assert.ok(tips.length >= 3 && tips.length <= 6);
   assert.deepEqual(tips.map((item) => item.id), ['balance', 'unassigned', 'overdue', 'due-soon', 'stale', 'review']);
@@ -162,7 +162,7 @@ test('tips stay a short list and the important ones come first', () => {
 });
 
 test('an empty month produces no tips', () => {
-  assert.deepEqual(coachTips({ people: [{ id: 1, name: 'Arshad Chengadu', open: 0, overdue: 0 }], open: 0 }), []);
+  assert.deepEqual(coachTips({ people: [{ id: 1, name: 'Sam Cole', role: 'admin', open: 0, overdue: 0 }], open: 0 }), []);
 });
 
 test('an empty review band stays off the chart', () => {
@@ -219,63 +219,112 @@ test('status changes are stored for the flow chart', () => {
   db.close();
 });
 
+test('superusers are never named or offered work', () => {
+  const tips = coachTips({
+    open: 10,
+    people: [
+      { id: 1, name: 'Pat Lee', role: 'superuser', open: 5, overdue: 4 },
+      { id: 2, name: 'Sam Cole', role: 'admin', open: 4, overdue: 1 },
+      { id: 3, name: 'Alex Kim', role: 'user', open: 0, overdue: 0 },
+      { id: 4, name: 'Jordan Blake', role: 'superuser', open: 0, overdue: 2 },
+    ],
+  });
+  const text = tips.map((item) => item.text).join('\n');
+  assert.equal(tips.find((item) => item.id === 'balance').text, 'Sam has 4 open, Alex has 0. Consider shifting some work to Alex.');
+  assert.equal(tips.find((item) => item.id === 'overdue').text, 'Sam has 1 overdue.');
+  assert.equal(tips.find((item) => item.id === 'idle').text, 'Alex has nothing open, give them work.');
+  assert.doesNotMatch(text, /Pat|Jordan/);
+  assert.equal(coachTips({
+    open: 5,
+    people: [
+      { id: 1, name: 'Pat Lee', role: 'superuser', open: 0, overdue: 0 },
+      { id: 2, name: 'Sam Cole', role: 'admin', open: 5, overdue: 0 },
+    ],
+  }).some((item) => item.id === 'balance' || item.id === 'idle'), false);
+});
+
 test('manage tips use the open work in the selected month', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-tips-'));
   const db = openDatabase(path.join(dir, 'board.sqlite'));
-  const arshad = createUser(db, { email: 'arshad@example.com', name: 'Arshad Chengadu', password: 'password1', role: 'admin' });
-  createUser(db, { email: 'duncan@example.com', name: 'Duncan Moss', password: 'password1', role: 'user' });
-  createUser(db, { email: 'jaime@example.com', name: 'Jaime Botha', password: 'password1', role: 'user' });
+  const sam = createUser(db, { email: 'sam@example.com', name: 'Sam Cole', password: 'password1', role: 'admin' });
+  createUser(db, { email: 'alex@example.com', name: 'Alex Kim', password: 'password1', role: 'user' });
+  createUser(db, { email: 'jordan@example.com', name: 'Jordan Blake', password: 'password1', role: 'user' });
+  const pat = createUser(db, { email: 'pat@example.com', name: 'Pat Lee', password: 'password1', role: 'superuser' });
   const today = todayDate();
   for (let index = 0; index < 5; index += 1) {
     createTask(db, {
       title: `Open ${index}`,
       description: '',
-      assigneeId: arshad.id,
-      assigneeIds: [arshad.id],
+      assigneeId: sam.id,
+      assigneeIds: [sam.id],
       status: 'todo',
       priority: null,
       dueDate: shiftDate(today, 10),
       projectId: null,
-      createdBy: arshad.id,
+      createdBy: sam.id,
     });
   }
   createTask(db, {
     title: 'Due soon',
     description: '',
-    assigneeId: arshad.id,
-    assigneeIds: [arshad.id],
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
     status: 'todo',
     priority: null,
     dueDate: shiftDate(today, 1),
     projectId: null,
-    createdBy: arshad.id,
+    createdBy: sam.id,
   });
   createTask(db, {
     title: 'Already started',
     description: '',
-    assigneeId: arshad.id,
-    assigneeIds: [arshad.id],
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
     status: 'in_progress',
     priority: null,
     dueDate: shiftDate(today, 1),
     projectId: null,
-    createdBy: arshad.id,
+    createdBy: sam.id,
   });
   createTask(db, {
     title: 'Due later',
     description: '',
-    assigneeId: arshad.id,
-    assigneeIds: [arshad.id],
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
     status: 'todo',
     priority: null,
     dueDate: shiftDate(today, 9),
     projectId: null,
-    createdBy: arshad.id,
+    createdBy: sam.id,
+  });
+  createTask(db, {
+    title: 'Ownerless',
+    description: '',
+    assigneeId: null,
+    assigneeIds: [],
+    status: 'todo',
+    priority: null,
+    dueDate: shiftDate(today, -1),
+    projectId: null,
+    createdBy: pat.id,
+  });
+  createTask(db, {
+    title: 'Late for a superuser',
+    description: '',
+    assigneeId: pat.id,
+    assigneeIds: [pat.id],
+    status: 'todo',
+    priority: null,
+    dueDate: shiftDate(today, 1),
+    projectId: null,
+    createdBy: pat.id,
   });
   const board = buildManage(db, { now: new Date() });
   db.close();
-  const balance = board.tips.find((item) => item.id === 'balance');
-  assert.equal(balance.text, 'Arshad has 8 open, Duncan and Jaime have 0. Consider shifting some work to them.');
-  const soon = board.tips.find((item) => item.id === 'due-soon');
-  assert.equal(soon.text, '1 task is due in the next 3 days and has not been started.');
+  const text = board.tips.map((item) => item.text).join('\n');
+  assert.equal(board.tips.find((item) => item.id === 'balance').text, 'Sam has 8 open, Alex and Jordan have 0. Consider shifting some work to them.');
+  assert.equal(board.tips.find((item) => item.id === 'due-soon').text, '2 tasks are due in the next 3 days and have not been started.');
+  assert.equal(board.tips.find((item) => item.id === 'unassigned').text, '1 task has no owner. Assign it.');
+  assert.equal(board.tips.some((item) => item.id === 'overdue'), false);
+  assert.doesNotMatch(text, /Pat/);
 });

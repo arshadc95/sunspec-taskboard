@@ -24,8 +24,12 @@ function countLine(count, singular, plural) {
   return count === 1 ? `1 task ${singular}` : `${count} tasks ${plural}`;
 }
 
+function namedStaff(people) {
+  return (people || []).filter((person) => person.role === 'user' || person.role === 'admin');
+}
+
 export function coachTips(facts = {}) {
-  const people = facts.people || [];
+  const people = namedStaff(facts.people);
   const open = Number.isFinite(facts.open) ? facts.open : people.reduce((sum, person) => sum + (person.open || 0), 0);
   const tips = [];
 
