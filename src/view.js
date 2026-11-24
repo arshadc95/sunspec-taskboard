@@ -723,9 +723,9 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     ? `<p class="meta">Created by ${nameLine(task.creator_name || 'Unknown', task.creator_color, task.created_by)} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${nameLine(task.reviewer_name, task.reviewer_color, task.reviewer_id)}</p>` : ''}`
     : '';
   const saveButtons = editable
-    ? `${isNew ? '<button class="btn btn-line" type="submit" form="task-edit" name="again" value="1">Save & add another</button>' : ''}<button class="btn btn-primary" type="submit" form="task-edit">Save</button>`
+    ? `${isNew ? '<button class="btn btn-line" type="submit" form="task-edit" name="again" value="1" data-task-save disabled>Save & add another</button>' : ''}<button class="btn btn-line" type="submit" form="task-edit" data-task-save disabled>Save</button>`
     : '';
-  const pageActions = `<div class="title-actions">${!isNew ? `${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? rowStatusActions(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}` : ''}${saveButtons}</div>`;
+  const pageActions = `<div class="title-actions">${!isNew ? `${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? reviewControl(task, user, `/tasks/${task.id}`) : ''}` : ''}${saveButtons}${!isNew && canComplete ? completeControl(task, user, csrf, `/tasks/${task.id}`, true) : ''}${!isNew && task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`;
   const commentBlock = isNew
     ? ''
     : `<section class="panel pad">

@@ -260,6 +260,9 @@ textarea { height: auto; min-height: 72px; padding: 8px 10px; resize: vertical; 
 .btn:hover { background: #f6f6f6; }
 .btn-primary { background: var(--orange); border-color: var(--orange-dark); color: #fff; }
 .btn-primary:hover { background: var(--orange-dark); }
+.btn-line { background: #fff; color: #111; border: 1px solid #111; }
+.btn:disabled { background: #f3f3f3; color: #9ca3af; border-color: #e5e5e5; cursor: default; }
+.btn:disabled:hover { background: #f3f3f3; }
 .btn-danger { color: var(--danger); border-color: #f3b4b4; }
 .btn-tiny { padding: 2px 6px; font-size: 11px; }
 .btn-block { width: 100%; margin-top: 4px; }

@@ -135,7 +135,10 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.equal(detail.text.includes('desc-preview'), false);
     assert.equal((detail.text.match(/Fit the meter/g) || []).length, 1);
     assert.match(detail.text, /class="task-layout"/);
-    assert.match(detail.text, /form="task-edit"/);
+    assert.match(detail.text, /class="btn btn-line" type="submit" form="task-edit" data-task-save disabled>Save</);
+    const saveAt = detail.text.indexOf('data-task-save');
+    const completeAt = detail.text.indexOf('title="Mark done"');
+    assert.ok(saveAt > 0 && completeAt > saveAt);
 
     await post(base, admin.cookies, `/tasks/${taskId}/comments`, {
       _csrf: form.csrf,

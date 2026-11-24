@@ -234,10 +234,38 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
     }
   });
 }
+function taskEditDirty() {
+  const form = document.querySelector('#task-edit');
+  const saves = [...document.querySelectorAll('[data-task-save]')];
+  if (!form || !saves.length) return;
+  const serial = () => [...new FormData(form).entries()]
+    .filter(([key]) => key !== '_csrf')
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+  const initial = serial();
+  let dirty = false;
+  const refresh = () => {
+    dirty = serial() !== initial;
+    saves.forEach((button) => { button.disabled = !dirty; });
+  };
+  form.addEventListener('input', refresh);
+  form.addEventListener('change', refresh);
+  form.addEventListener('click', refresh);
+  form.addEventListener('submit', () => { dirty = false; });
+  window.addEventListener('beforeunload', (event) => {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  refresh();
+}
+taskEditDirty();
 document.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
+      const save = document.querySelector('#task-edit [data-task-save], [form="task-edit"][data-task-save]');
+      if (input.form?.id === 'task-edit' && save?.disabled) return;
       input.form?.requestSubmit();
     }
   });
@@ -249,7 +277,8 @@ document.addEventListener('keydown', (event) => {
     openDrawer();
   }
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-    const form = event.target.closest?.('.task-form');
+    const form = event.target.form || event.target.closest?.('.task-form');
+    if (form?.id === 'task-edit' && document.querySelector('[data-task-save]')?.disabled) return;
     if (form) form.requestSubmit();
   }
 });
@@ -262,7 +291,10 @@ document.querySelectorAll('[data-priority], [data-status]').forEach((button) => 
     wrap.querySelectorAll(`[${attr}]`).forEach((item) => item.classList.remove('on'));
     button.classList.add('on');
     const input = button.closest('.field')?.querySelector(inputName);
-    if (input) input.value = button.getAttribute(attr) || '';
+    if (input) {
+      input.value = button.getAttribute(attr) || '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   });
 });
 
@@ -270,7 +302,10 @@ document.querySelectorAll('[data-due]').forEach((button) => {
   button.addEventListener('click', () => {
     const field = button.closest('.field');
     const input = field?.querySelector('[data-due-input]');
-    if (input) input.value = button.getAttribute('data-due') || '';
+    if (input) {
+      input.value = button.getAttribute('data-due') || '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     field?.querySelectorAll('[data-due]').forEach((item) => item.classList.remove('on'));
     button.classList.add('on');
   });
@@ -278,7 +313,10 @@ document.querySelectorAll('[data-due]').forEach((button) => {
 
 function syncAssignees(field) {
   const hidden = field.querySelector('[data-assignee-ids]');
-  if (hidden) hidden.value = [...field.querySelectorAll('.assignee-chip')].map((chip) => chip.dataset.id).join(',');
+  if (hidden) {
+    hidden.value = [...field.querySelectorAll('.assignee-chip')].map((chip) => chip.dataset.id).join(',');
+    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+  }
 }
 function addAssignee(field, id, name, swatchClass) {
   const chips = field.querySelector('[data-assignee-chips]');
@@ -411,6 +449,7 @@ function attachCombo(input, hidden, items) {
         event.preventDefault();
         input.value = item.name;
         hidden.value = item.id;
+        hidden.dispatchEvent(new Event('input', { bubbles: true }));
         menu.hidden = true;
       });
       menu.append(choice);
