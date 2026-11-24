@@ -1088,6 +1088,22 @@ td.num.late { color: #dc2626; font-weight: 700; }
   cursor: pointer;
 }
 .grok-attach svg { width: 18px; height: 18px; }
+.grok-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  font-weight: 700;
+  pointer-events: none;
+}
+.grok-drop.is-on { display: flex; }
+.grok-file-error { margin: 0; padding: 4px 8px 0; color: #b91c1c; font-size: 12px; }
+.grok-file-error:empty { display: none; }
+.grok-queued { opacity: .72; }
 .grok-picked { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px 0; }
 .grok-picked:empty { display: none; }
 .grok-picked span { display: inline-flex; align-items: center; gap: 4px; background: #1a1a1a; color: #fff; padding: 2px 6px; font-size: 12px; }

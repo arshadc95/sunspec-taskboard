@@ -450,7 +450,6 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     const task = await post(base, admin, '/tasks', { _csrf: taskForm.csrf, title: 'Fan', status: 'todo' });
     const taskId = Number(task.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
     const taskPage = await page(base, lindi, `/tasks/${taskId}`);
-    assert.equal(taskPage.text.includes('PDF for Grok'), false);
     assert.equal(taskPage.text.includes('name="files"'), false);
     const commented = await post(base, lindi, `/tasks/${taskId}/comments`, {
       _csrf: taskPage.csrf,

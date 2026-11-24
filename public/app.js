@@ -1,4 +1,4 @@
-import { applyGrokClick } from './grok-panel.js';
+import { acceptGrokFiles, applyGrokClick, grokQueuedLabel, grokShouldQueue } from './grok-panel.js';
 import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
 document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
@@ -524,6 +524,8 @@ if (grokRoot) {
   let connected = true;
   let threadId = null;
   let chosen = [];
+  let queue = [];
+  let sending = false;
   let waitingCount = 0;
   let knownWaiting = null;
   const unread = new Map();
@@ -687,9 +689,38 @@ if (grokRoot) {
     }
     noteArrivals(state.waiting || []);
     waitingCount = (state.waiting || []).length;
+    renderQueued();
+    if (!sending && !pending) flushQueue();
   }
 
   const pdfNote = grokRoot.querySelector('[data-grok-pdf-note]');
+  const fileError = grokRoot.querySelector('[data-grok-file-error]');
+  const dropOverlay = grokRoot.querySelector('[data-grok-drop]');
+  let dragDepth = 0;
+  let errorTimer = 0;
+  function showFileError(message) {
+    if (!fileError) return;
+    fileError.textContent = message || '';
+    window.clearTimeout(errorTimer);
+    if (message) errorTimer = window.setTimeout(() => { fileError.textContent = ''; }, 4000);
+  }
+  function addFiles(list) {
+    const result = acceptGrokFiles(chosen, list);
+    chosen = result.files;
+    showPicked();
+    showFileError(result.error);
+  }
+  function renderQueued() {
+    log.querySelectorAll('[data-queued]').forEach((node) => node.remove());
+    queue.forEach((item) => {
+      const line = document.createElement('p');
+      line.className = 'grok-mine grok-queued';
+      line.dataset.queued = '1';
+      line.textContent = grokQueuedLabel(item);
+      log.append(line);
+    });
+    if (queue.length) log.scrollTop = log.scrollHeight;
+  }
   function showPicked() {
     picked.innerHTML = '';
     chosen.forEach((file, index) => {
@@ -794,23 +825,55 @@ if (grokRoot) {
   });
   grokRoot.querySelector('[data-grok-attach]').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
-    chosen = chosen.concat([...fileInput.files]).slice(0, 5);
+    addFiles([...fileInput.files]);
     fileInput.value = '';
-    showPicked();
   });
-  form.addEventListener('submit', async (event) => {
+  panel.addEventListener('dragenter', (event) => {
+    if (!open) return;
     event.preventDefault();
-    const input = form.querySelector('input[name="text"]');
-    const text = input.value.trim();
-    if (!text && !chosen.length) return;
-    input.value = '';
-    const sending = chosen;
-    chosen = [];
-    showPicked();
-    if (text) {
+    dragDepth += 1;
+    dropOverlay?.classList.add('is-on');
+  });
+  panel.addEventListener('dragover', (event) => {
+    if (!open) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+  });
+  panel.addEventListener('dragleave', () => {
+    if (!open) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dropOverlay?.classList.remove('is-on');
+  });
+  panel.addEventListener('drop', (event) => {
+    if (!open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth = 0;
+    dropOverlay?.classList.remove('is-on');
+    addFiles([...(event.dataTransfer?.files || [])]);
+  });
+  window.addEventListener('dragover', (event) => {
+    if (open) event.preventDefault();
+  });
+  window.addEventListener('drop', (event) => {
+    if (!open) return;
+    event.preventDefault();
+    dragDepth = 0;
+    dropOverlay?.classList.remove('is-on');
+  });
+  window.addEventListener('paste', (event) => {
+    if (!open) return;
+    const files = [...(event.clipboardData?.files || [])];
+    if (!files.length) return;
+    event.preventDefault();
+    addFiles(files);
+  });
+  async function sendItem(item) {
+    sending = true;
+    if (item.text) {
       const mine = document.createElement('p');
       mine.className = 'grok-mine';
-      mine.textContent = text;
+      mine.textContent = item.text;
       log.append(mine);
     }
     const wait = connected ? ackNode('') : document.createElement('p');
@@ -822,18 +885,47 @@ if (grokRoot) {
     log.scrollTop = log.scrollHeight;
     const body = new FormData();
     body.set('_csrf', csrf);
-    body.set('text', text);
+    body.set('text', item.text);
     if (threadId) body.set('thread_id', String(threadId));
-    sending.forEach((file) => body.append('files', file));
-    const response = await fetch('/api/grok', { method: 'POST', headers: { accept: 'application/json' }, body });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      wait.className = 'grok-note';
-      wait.textContent = payload.error || 'Grok could not take that message.';
+    item.files.forEach((file) => body.append('files', file));
+    let failed = false;
+    try {
+      const response = await fetch('/api/grok', { method: 'POST', headers: { accept: 'application/json' }, body });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        failed = true;
+        wait.className = 'grok-note';
+        wait.textContent = payload.error || 'Grok could not take that message.';
+        return;
+      }
+      paint(payload);
+      watch();
+    } finally {
+      sending = false;
+    }
+    if (failed || !pending) flushQueue();
+  }
+  function flushQueue() {
+    if (sending || pending || !queue.length) return;
+    const item = queue.shift();
+    renderQueued();
+    sendItem(item);
+  }
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const input = form.querySelector('input[name="text"]');
+    const text = input.value.trim();
+    if (!text && !chosen.length) return;
+    const item = { text, files: chosen };
+    input.value = '';
+    chosen = [];
+    showPicked();
+    if (grokShouldQueue({ sending, pending, queued: queue.length })) {
+      queue.push(item);
+      renderQueued();
       return;
     }
-    paint(payload);
-    watch();
+    sendItem(item);
   });
   soundButton.addEventListener('click', () => {
     const on = soundButton.getAttribute('aria-pressed') === 'false';

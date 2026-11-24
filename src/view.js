@@ -162,8 +162,10 @@ function grokWidget(user, csrf) {
       </header>
       <div class="grok-chats" data-grok-list hidden></div>
       <div class="grok-log" data-grok-log></div>
+      <div class="grok-drop" data-grok-drop>Drop PDF for Grok</div>
       <form class="grok-form" data-grok-form>
         <div class="grok-picked" data-grok-picked></div>
+        <p class="grok-file-error" data-grok-file-error></p>
         <p class="grok-pdf-note" data-grok-pdf-note hidden>Grok can read attached PDFs (max 5 × 15 MB, deleted after 24 h).</p>
         <div class="grok-compose">
           <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
