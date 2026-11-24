@@ -695,9 +695,8 @@ export function renderUsers({ user, csrf, msg, users, removed = null }) {
 
 function manageHref(board, extra = {}) {
   const params = new URLSearchParams();
-  const range = extra.range !== undefined ? extra.range : board.range;
-  if (range) params.set('range', range);
-  else params.set('period', String(extra.period || board.periodDays || 30));
+  const month = extra.month !== undefined ? extra.month : board.month;
+  if (month) params.set('month', month);
   if (board.projectId) params.set('project', String(board.projectId));
   if (extra.sort) params.set('sort', extra.sort);
   if (extra.dir) params.set('dir', extra.dir);
@@ -754,16 +753,12 @@ export function renderManage({ user, csrf, msg, board, projects }) {
         <span>Manage</span>
         <form class="manage-switch" method="get" action="/manage" data-live>
           <select name="project" aria-label="Project">${options((projects || []).map((project) => [String(project.id), project.name]), board.projectId || '', 'All projects')}</select>
-          <input type="hidden" name="period" value="${board.periodDays}">
-          <span class="seg-toggle">
-            ${[7, 30, 90].map((days) => `<a class="${!board.range && board.periodDays === days ? 'on' : ''}" href="${manageHref(board, { period: days, range: '' })}">${days}d</a>`).join('')}
-          </span>
-          <select name="range" aria-label="Month">
-            <option value="">Month</option>
-            <option value="this"${board.range === 'this' ? ' selected' : ''}>This month</option>
-            ${(board.months || []).map((month) => `<option value="${esc(month.value)}"${board.range === month.value ? ' selected' : ''}>${esc(month.label)}</option>`).join('')}
-            <option value="year"${board.range === 'year' ? ' selected' : ''}>This year</option>
-          </select>
+          <input type="hidden" name="month" value="${esc(board.month)}">
+          <nav class="month-step" aria-label="Month">
+            ${board.canPrev ? `<a class="month-step-btn" href="${manageHref(board, { month: board.prevMonth })}" aria-label="Previous month">‹</a>` : '<span class="month-step-btn is-off" aria-disabled="true">‹</span>'}
+            <span class="month-step-label">${esc(board.monthTitle)}</span>
+            ${board.canNext ? `<a class="month-step-btn" href="${manageHref(board, { month: board.nextMonth })}" aria-label="Next month">›</a>` : '<span class="month-step-btn is-off" aria-disabled="true">›</span>'}
+          </nav>
           <a class="bar-clear" href="/manage">Clear</a>
         </form>
       </header>
@@ -812,7 +807,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       ${manageCard('Days per task', 'Each dot is a finished task. Higher means it took longer.', `<div class="chart-pad">${scatterChart(board.cycle.points, board.cycle.p85) || '<p class="hint">No finished tasks in this period.</p>'}</div>`)}
       ${manageCard('Open over time', 'A flat or falling line means open work is not growing.', `<div class="chart-pad">${backlogChart(board.backlog) || '<p class="hint">No open tasks in this period.</p>'}</div>`)}
     </div>
-    ${manageCard('Workload', board.bucket === 'week' ? 'Orange marks a week that person finished a task.' : 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
+    ${manageCard('Workload', 'Orange marks a day that person finished a task.', `<div class="chart-pad chart-scroll">${heatMap(board.heatmap) || '<p class="hint">No finished work in this period.</p>'}</div>`)}
     ${manageCard('Month by month', 'Created, finished, and still late at the end of each month.', `<div class="table-wrap"><table class="grid">
       <thead><tr><th>Month</th><th class="num">Created</th><th class="num">Done</th><th class="num">Overdue</th><th class="num">Avg days to finish</th></tr></thead>
       <tbody>${(board.monthRows || []).map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.created}</td><td class="num">${row.done}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.avg == null ? '—' : row.avg}</td></tr>`).join('')}</tbody>

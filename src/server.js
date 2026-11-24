@@ -1147,14 +1147,11 @@ function filterQuery(filters) {
 
 function manageFilters(req) {
   const projectId = /^\d+$/.test(String(req.query.project || '')) ? Number(req.query.project) : null;
-  const period = Number(req.query.period);
-  const days = [7, 30, 90].includes(period) ? period : 30;
-  const range = String(req.query.range || '');
-  const month = range === 'this' || /^\d{4}-(0[1-9]|1[0-2])$/.test(range) ? range : null;
-  const year = range === 'year';
+  const rawMonth = String(req.query.month || '');
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(rawMonth) ? rawMonth : null;
   const sort = ['name', 'assigned', 'done', 'ontime', 'avg', 'overdue'].includes(req.query.sort) ? req.query.sort : 'name';
   const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
-  return { projectId, days, month, year, sort, dir };
+  return { projectId, month, sort, dir };
 }
 
 function toastFrom(req) {

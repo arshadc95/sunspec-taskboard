@@ -33,6 +33,7 @@ function round1(value) {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 export function addMonths(ym, count) {
   const [year, month] = ym.split('-').map(Number);
@@ -43,6 +44,28 @@ export function addMonths(ym, count) {
 export function monthLabel(ym) {
   const month = Number(ym.slice(5, 7));
   return `${MONTHS[month - 1]} ${ym.slice(0, 4)}`;
+}
+
+export function monthTitle(ym) {
+  const month = Number(ym.slice(5, 7));
+  return `${MONTHS_LONG[month - 1]} ${ym.slice(0, 4)}`;
+}
+
+export function clampMonth(requested, firstYmd, todayYmd) {
+  const current = todayYmd.slice(0, 7);
+  const first = (firstYmd || todayYmd).slice(0, 7);
+  const floor = first <= current ? first : current;
+  let ym = /^\d{4}-(0[1-9]|1[0-2])$/.test(requested || '') ? requested : current;
+  if (ym > current) ym = current;
+  if (ym < floor) ym = floor;
+  return {
+    ym,
+    prev: addMonths(ym, -1),
+    next: addMonths(ym, 1),
+    canPrev: ym > floor,
+    canNext: ym < current,
+    title: monthTitle(ym),
+  };
 }
 
 export function monthSpan(ym, now = new Date()) {
@@ -60,25 +83,6 @@ export function monthSpan(ym, now = new Date()) {
   };
 }
 
-export function previousMonths(firstYmd, todayYmd) {
-  if (!firstYmd || !todayYmd) return [];
-  const first = firstYmd.slice(0, 7);
-  let cursor = addMonths(todayYmd.slice(0, 7), -1);
-  const months = [];
-  while (cursor >= first && months.length < 240) {
-    months.push(cursor);
-    cursor = addMonths(cursor, -1);
-  }
-  return months;
-}
-
-export function yearSpan(now = new Date()) {
-  const year = Number(todayDate(now).slice(0, 4));
-  const start = Date.parse(`${year}-01-01T00:00:00+02:00`);
-  const prevStart = Date.parse(`${year - 1}-01-01T00:00:00+02:00`);
-  return { year, start, end: now.getTime() + 1, prevStart, prevEnd: start };
-}
-
 function onTimeRate(tasks) {
   const withDue = tasks.filter((task) => task.due_date);
   if (!withDue.length) return null;
@@ -86,46 +90,9 @@ function onTimeRate(tasks) {
   return Math.round((ok / withDue.length) * 100);
 }
 
-export function buildManage(db, { projectId = null, days = 30, month = null, year = false, sort = 'name', dir = 'asc', now = new Date() } = {}) {
+export function buildManage(db, { projectId = null, month = null, sort = 'name', dir = 'asc', now = new Date() } = {}) {
   const today = todayDate(now);
   const nowMs = now.getTime();
-  const chosenMonth = month === 'this' ? today.slice(0, 7) : month;
-  const monthWindow = chosenMonth ? monthSpan(chosenMonth, now) : null;
-  const yearWindow = year && !monthWindow ? yearSpan(now) : null;
-  let periodStart;
-  let periodEnd;
-  let prevStart;
-  let prevEnd;
-  let bucket;
-  let range = '';
-  let compare;
-  if (monthWindow) {
-    periodStart = monthWindow.start;
-    periodEnd = monthWindow.end;
-    const previous = monthSpan(monthWindow.prev, new Date(monthWindow.start - 1));
-    prevStart = previous.start;
-    prevEnd = previous.end;
-    bucket = 'day';
-    range = month === 'this' ? 'this' : chosenMonth;
-    compare = 'vs last month';
-  } else if (yearWindow) {
-    periodStart = yearWindow.start;
-    periodEnd = yearWindow.end;
-    prevStart = yearWindow.prevStart;
-    prevEnd = yearWindow.prevEnd;
-    bucket = 'week';
-    range = 'year';
-    compare = 'vs last year';
-  } else {
-    const length = [7, 30, 90].includes(days) ? days : 30;
-    days = length;
-    periodStart = nowMs - length * 86400000;
-    periodEnd = nowMs + 1;
-    prevStart = nowMs - length * 2 * 86400000;
-    prevEnd = periodStart;
-    bucket = length >= 90 ? 'week' : 'day';
-    compare = `vs last ${length} days`;
-  }
   const tasks = db.prepare(`
     SELECT t.id, t.title, t.status, t.due_date, t.project_id, t.created_at, t.completed_at, t.updated_at, t.deleted_at,
            p.name AS project_name
@@ -153,6 +120,19 @@ export function buildManage(db, { projectId = null, days = 30, month = null, yea
   }
   const live = tasks.filter((task) => !task.deleted_at);
   const names = new Map(people.map((person) => [person.id, person.name]));
+  const firstStamp = live.reduce((min, task) => {
+    const at = Date.parse(task.created_at);
+    return Number.isFinite(at) ? Math.min(min, at) : min;
+  }, Infinity);
+  const firstYmd = Number.isFinite(firstStamp) ? dateInJohannesburg(new Date(firstStamp)) : today;
+  const picked = clampMonth(month, firstYmd, today);
+  const monthWindow = monthSpan(picked.ym, now);
+  const periodStart = monthWindow.start;
+  const periodEnd = monthWindow.end;
+  const previous = monthSpan(monthWindow.prev, new Date(monthWindow.start - 1));
+  const prevStart = previous.start;
+  const prevEnd = previous.end;
+  const compare = 'vs last month';
 
   function openAt(ms) {
     return live.filter((task) => Date.parse(task.created_at) <= ms && (!task.completed_at || Date.parse(task.completed_at) > ms));
@@ -219,21 +199,10 @@ export function buildManage(db, { projectId = null, days = 30, month = null, yea
   const startYmd = dateInJohannesburg(new Date(periodStart));
   const lastYmd = dateInJohannesburg(new Date(periodEnd - 1));
   const slots = [];
-  if (bucket === 'week') {
-    let cursor = weekStartDate(startYmd);
-    while (cursor <= lastYmd) {
-      const next = shiftDate(cursor, 7);
-      const from = Math.max(periodStart, Date.parse(`${cursor}T00:00:00+02:00`));
-      const to = Math.min(periodEnd, Date.parse(`${next}T00:00:00+02:00`));
-      slots.push({ label: cursor.slice(5), from, to });
-      cursor = next;
-    }
-  } else {
-    for (let day = startYmd; day <= lastYmd; day = shiftDate(day, 1)) {
-      const from = Date.parse(`${day}T00:00:00+02:00`);
-      const to = Math.min(periodEnd, Date.parse(`${shiftDate(day, 1)}T00:00:00+02:00`));
-      slots.push({ label: day.slice(5), from, to });
-    }
+  for (let day = startYmd; day <= lastYmd; day = shiftDate(day, 1)) {
+    const from = Date.parse(`${day}T00:00:00+02:00`);
+    const to = Math.min(periodEnd, Date.parse(`${shiftDate(day, 1)}T00:00:00+02:00`));
+    slots.push({ label: day.slice(5), from, to });
   }
 
   const throughput = slots.map((slot) => ({
@@ -273,7 +242,7 @@ export function buildManage(db, { projectId = null, days = 30, month = null, yea
   const sortedCycles = [...cycles].sort((a, b) => a - b);
   const p85 = round1(percentile(sortedCycles, 0.85));
 
-  const heatWeeks = slots.map((slot) => (bucket === 'week' ? slot.label : slot.label.slice(3)));
+  const heatWeeks = slots.map((slot) => slot.label.slice(3));
   const heatRows = sortedPeople.map((person) => ({ name: person.name, cells: [] }));
   let heatMax = 1;
   slots.forEach((slot, slotIndex) => {
@@ -328,12 +297,6 @@ export function buildManage(db, { projectId = null, days = 30, month = null, yea
   const weekStartMs = Date.parse(`${weekStartDate(today)}T00:00:00+02:00`);
   const onTimeWeek = live.filter((task) => task.status === 'done' && task.due_date && task.completed_at && Date.parse(task.completed_at) >= weekStartMs && dateInJohannesburg(task.completed_at) <= task.due_date).length;
   const finisher = [...personStats].sort((a, b) => b.done - a.done)[0];
-  const firstStamp = live.reduce((min, task) => {
-    const at = Date.parse(task.created_at);
-    return Number.isFinite(at) ? Math.min(min, at) : min;
-  }, Infinity);
-  const firstYmd = Number.isFinite(firstStamp) ? dateInJohannesburg(new Date(firstStamp)) : today;
-  const monthChoices = previousMonths(firstYmd, today).map((ym) => ({ value: ym, label: monthLabel(ym) }));
   const monthRows = [];
   let monthCursor = today.slice(0, 7);
   for (let i = 0; i < 6; i += 1) {
@@ -351,11 +314,15 @@ export function buildManage(db, { projectId = null, days = 30, month = null, yea
   }
 
   return {
-    periodDays: days,
-    range,
+    periodDays: Math.max(1, Math.ceil(spanMs / 86400000)),
+    month: picked.ym,
+    monthTitle: picked.title,
+    prevMonth: picked.prev,
+    nextMonth: picked.next,
+    canPrev: picked.canPrev,
+    canNext: picked.canNext,
     compare,
-    bucket,
-    months: monthChoices,
+    bucket: 'day',
     monthRows,
     sort,
     dir,
@@ -383,7 +350,7 @@ export function buildManage(db, { projectId = null, days = 30, month = null, yea
     attention: attention.slice(0, 12),
     projects: projectRows,
     tips: coachTips({
-      periodDays: days,
+      periodDays: Math.max(1, Math.ceil(spanMs / 86400000)),
       historyDays: Math.max(1, Math.ceil(spanMs / 86400000)),
       open: openNow.length,
       people: personStats.map((person) => ({ ...person, open: person.assigned })),

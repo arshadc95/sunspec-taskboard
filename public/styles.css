@@ -767,6 +767,22 @@ table.grid td.num { text-align: left; }
 .bar-n { text-align: left; font-variant-numeric: tabular-nums; }
 .manage-switch { margin-left: auto; display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; }
 .manage-switch select { height: 28px; width: auto; min-width: 140px; background: #fff; color: #111; }
+.month-step { display: inline-flex; align-items: center; gap: 6px; }
+.month-step-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #111;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1;
+}
+.month-step-btn.is-off { background: #333; color: #777; }
+.month-step-label { color: #fff; font-weight: 700; font-size: 13px; min-width: 9em; text-align: center; }
 .sheet-title .bar-clear { color: #fff; }
 .kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space); align-items: stretch; margin-top: var(--space); }
 .kpi { background: #fff; border: 1px solid var(--line); border-top: 3px solid #d4d4d4; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
