@@ -936,9 +936,7 @@ function weekCells(anchor) {
 function chip(task, today) {
   const overdue = isOverdue(task.due_date, task.status, today);
   const done = task.status === 'done';
-  const first = (task.assignees || []).find((person) => isPaletteColor(person.color));
-  const bar = first ? ` style="border-left-color:${first.color}"` : '';
-  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${done ? ' done' : ''}"${bar} href="/tasks/${task.id}">${assigneeMarks(task)}${esc(task.title)}</a>`;
+  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${done ? ' done' : ''}" href="/tasks/${task.id}">${assigneeMarks(task)}${esc(task.title)}</a>`;
 }
 
 export function renderCalendar({ user, csrf, msg, tasks, filters, users, projects, today, view, year, month, anchor }) {

@@ -169,7 +169,7 @@ export function heatMap(heatmap) {
   const max = heatmap.max || 1;
   let body = weeks.map((week, index) => `<text x="${label + index * cell + 2}" y="12" font-size="9" fill="#555">${esc(week)}</text>`).join('');
   rows.forEach((row, rowIndex) => {
-    if (isPaletteColor(row.color)) body += `<rect x="0" y="${22 + rowIndex * cell + 4}" width="8" height="8" fill="${row.color}"/>`;
+    if (isPaletteColor(row.color)) body += `<circle cx="4" cy="${22 + rowIndex * cell + 8}" r="4" fill="${row.color}"/>`;
     body += `<text x="12" y="${22 + rowIndex * cell + 12}" font-size="10" fill="#111">${esc(row.name)}</text>`;
     row.cells.forEach((count, index) => {
       const shade = count ? 0.15 + 0.85 * (count / max) : 0.06;
