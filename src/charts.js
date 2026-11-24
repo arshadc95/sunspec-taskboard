@@ -83,7 +83,7 @@ export function throughputChart(rows) {
 }
 
 const FLOW = [
-  ['todo', 'To do', '#374151'],
+  ['todo', 'To do', '#1e3a8a'],
   ['in_progress', 'In progress', '#f97316'],
   ['review', 'Review', '#0f766e'],
   ['done', 'Done', '#d1d5db'],
@@ -96,33 +96,28 @@ function flowSeries(cfd) {
   return { days, flow, totals };
 }
 
-function horizontalStatus(cfd, index) {
-  const { flow } = flowSeries(cfd);
-  const day = cfd.days[index];
-  const parts = flow.map(([key, label, color]) => ({ label, color, value: Number(cfd[key][index]) || 0 })).filter((part) => part.value > 0);
-  const total = parts.reduce((sum, part) => sum + part.value, 0) || 1;
-  const w = 640;
-  const h = 78;
-  let x = 28;
-  const barW = w - 40;
-  const segs = parts.map((part) => {
-    const width = (part.value / total) * barW;
-    const rect = `<rect x="${x.toFixed(1)}" y="36" width="${Math.max(width, 1).toFixed(1)}" height="22" fill="${part.color}"><title>${esc(day)}: ${part.label} ${part.value}</title></rect>`;
-    x += width;
-    return rect;
+function dateAxis(days, totals, slot, left, h) {
+  const labelEvery = Math.max(1, Math.ceil(days.length / 8));
+  const positions = days.map((_, index) => left + index * slot + slot / 2);
+  const minGap = slot >= 36 ? 32 : 13;
+  const chosen = [];
+  const fits = (index) => chosen.every((other) => Math.abs(positions[index] - positions[other]) >= minGap);
+  days.forEach((_, index) => {
+    if (totals[index] > 0 && fits(index)) chosen.push(index);
+  });
+  days.forEach((_, index) => {
+    const sparse = index % labelEvery === 0 || index === days.length - 1;
+    if (!totals[index] && sparse && fits(index)) chosen.push(index);
+  });
+  return chosen.sort((a, b) => a - b).map((index) => {
+    const text = slot >= 36 ? days[index] : String(days[index]).slice(-2);
+    return `<text x="${positions[index].toFixed(1)}" y="${h - 8}" text-anchor="middle" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(text)}</text>`;
   }).join('');
-  const summary = parts.map((part) => `${part.label} ${part.value}`).join(', ');
-  return `<svg class="chart status-today" viewBox="0 0 ${w} ${h}" role="img" aria-label="Status today">${legendRow(parts.map((part) => [part.label, part.color]), 28, 8)}${segs}<text x="28" y="72" font-size="11" fill="#111" font-family="Inter, sans-serif">${esc(day)}: ${esc(summary)}</text></svg>`;
 }
 
 export function stackedArea(cfd) {
   const { days, flow, totals } = flowSeries(cfd);
   if (!days.length || !flow.length || !totals.some((value) => value > 0)) return '';
-  const active = totals.reduce((count, value) => count + (value > 0 ? 1 : 0), 0);
-  if (active < 2) {
-    const index = totals.findLastIndex((value) => value > 0);
-    return horizontalStatus(cfd, index < 0 ? days.length - 1 : index);
-  }
   const w = 640;
   const h = 210;
   const left = 32;
@@ -130,31 +125,37 @@ export function stackedArea(cfd) {
   const bottom = 28;
   const plotH = h - top - bottom;
   const plotW = w - left - 12;
-  const max = Math.max(...totals, 1);
+  const values = flow.flatMap(([key]) => days.map((_, index) => Number(cfd[key][index]) || 0));
+  const max = Math.max(1, ...values);
   const slot = plotW / days.length;
-  const gap = Math.min(3, slot * 0.18);
-  const bw = Math.max(2, slot - gap);
-  const yAt = (value) => top + plotH - (value / max) * plotH;
+  const groupGap = Math.min(8, slot * 0.28);
+  const innerGap = flow.length > 1 ? Math.min(3, slot * 0.08) : 0;
+  const span = Math.max(flow.length * 2, slot - groupGap);
+  const bw = (span - innerGap * (flow.length - 1)) / flow.length;
+  const base = top + plotH;
+  const yAt = (value) => base - (value / max) * plotH;
   const bars = days.map((day, index) => {
-    let cursor = top + plotH;
-    const bits = flow.map(([key, label]) => `${label} ${cfd[key][index] || 0}`).join(', ');
-    const segments = flow.map(([key, label, color]) => {
+    const groupX = left + index * slot + (slot - span) / 2;
+    return flow.map(([key, label, color], series) => {
       const value = Number(cfd[key][index]) || 0;
-      const height = (value / max) * plotH;
-      cursor -= height;
       if (!value) return '';
-      return `<rect x="${(left + index * slot).toFixed(1)}" y="${cursor.toFixed(1)}" width="${bw.toFixed(1)}" height="${height.toFixed(1)}" fill="${color}"><title>${esc(day)}: ${label} ${value}</title></rect>`;
+      const x = groupX + series * (bw + innerGap);
+      const y = yAt(value);
+      const height = base - y;
+      const rect = `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(height, 1).toFixed(1)}" fill="${color}"><title>${esc(day)}: ${label} ${value}</title></rect>`;
+      const digits = String(value).length;
+      const room = bw >= digits * 5.5 && y >= 18;
+      const valueLabel = room
+        ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" font-size="9" fill="#111" font-family="Inter, sans-serif">${value}</text>`
+        : '';
+      return rect + valueLabel;
     }).join('');
-    const labelEvery = Math.ceil(days.length / 8);
-    const label = days.length <= 12 || index % labelEvery === 0 || index === days.length - 1
-      ? `<text x="${(left + index * slot + bw / 2).toFixed(1)}" y="${h - 8}" text-anchor="middle" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(day)}</text>`
-      : '';
-    return `${segments}<rect x="${(left + index * slot).toFixed(1)}" y="${top}" width="${bw.toFixed(1)}" height="${plotH}" fill="transparent"><title>${esc(day)}: ${bits}</title></rect>${label}`;
   }).join('');
   const ticks = axisTicks(max).map((value) => `<text x="2" y="${(yAt(value) + 3).toFixed(1)}" font-size="9" fill="#555" font-family="Inter, sans-serif">${value}</text>`).join('');
-  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
-    + `<line x1="${left}" y1="${top + plotH}" x2="${w - 12}" y2="${top + plotH}" stroke="#e5e5e5"/>`
-    + ticks;
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${base}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${base}" x2="${w - 12}" y2="${base}" stroke="#e5e5e5"/>`
+    + ticks
+    + dateAxis(days, totals, slot, left, h);
   return `<svg class="chart status-bars" viewBox="0 0 ${w} ${h}" role="img" aria-label="Status over time">${legendRow(flow.map(([, label, color]) => [label, color]), left, 6)}${axis}${bars}</svg>`;
 }
 

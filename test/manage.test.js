@@ -207,7 +207,15 @@ test('a person with no tasks still appears in the manage people list', () => {
   assert.deepEqual(board.heatmap.rows.map((row) => row.name), ['Sam Cole', 'Alex Kim', 'Quiet Person']);
 });
 
-test('one day of status data is a stacked bar, and a full month uses daily bars', () => {
+function barsOf(svg, fill) {
+  return [...svg.matchAll(new RegExp(`<rect x="([\\d.]+)" y="([\\d.]+)" width="([\\d.]+)" height="([\\d.]+)" fill="${fill}"`, 'g'))].map((match) => ({
+    x: Number(match[1]),
+    y: Number(match[2]),
+    h: Number(match[4]),
+  })).filter((bar) => bar.h > 8);
+}
+
+test('status over time groups each day instead of stacking', () => {
   const days = Array.from({ length: 24 }, (_, index) => `11-${String(index + 1).padStart(2, '0')}`);
   const zeros = days.map(() => 0);
   const spike = stackedArea({
@@ -217,13 +225,24 @@ test('one day of status data is a stacked bar, and a full month uses daily bars'
     review: zeros,
     done: zeros,
   });
-  assert.match(spike, /status-today/);
-  assert.match(spike, /#374151/);
+  assert.match(spike, /status-bars/);
+  assert.doesNotMatch(spike, /status-today/);
+  assert.match(spike, /#1e3a8a/);
   assert.match(spike, /#f97316/);
   assert.match(spike, /<title>11-24: To do 6<\/title>/);
   assert.match(spike, /<title>11-24: In progress 2<\/title>/);
+  assert.match(spike, />24</);
+  assert.match(spike, />6</);
+  assert.match(spike, />2</);
+  assert.doesNotMatch(spike, />8</);
   assert.doesNotMatch(spike, /Review/);
   assert.doesNotMatch(spike, /<polygon/);
+  const spikeTodo = barsOf(spike, '#1e3a8a');
+  const spikeProgress = barsOf(spike, '#f97316');
+  assert.equal(spikeTodo.length, 1);
+  assert.equal(spikeProgress.length, 1);
+  assert.ok(spikeProgress[0].x > spikeTodo[0].x);
+  assert.ok(Math.abs((spikeTodo[0].y + spikeTodo[0].h) - (spikeProgress[0].y + spikeProgress[0].h)) < 0.2);
 
   const bars = stackedArea({
     days: ['11-01', '11-02', '11-03'],
@@ -233,12 +252,26 @@ test('one day of status data is a stacked bar, and a full month uses daily bars'
     done: [0, 0, 0],
   });
   assert.match(bars, /status-bars/);
-  assert.match(bars, /#374151/);
+  assert.match(bars, /#1e3a8a/);
   assert.match(bars, /#f97316/);
   assert.match(bars, /<title>11-01: To do 6<\/title>/);
+  assert.match(bars, />11-01</);
+  assert.match(bars, />11-02</);
+  assert.match(bars, />11-03</);
+  assert.match(bars, />6</);
+  assert.match(bars, />2</);
   assert.match(bars, />4</);
-  assert.match(bars, />8</);
+  assert.doesNotMatch(bars, />8</);
   assert.doesNotMatch(bars, /Review/);
+  const todo = barsOf(bars, '#1e3a8a');
+  const progress = barsOf(bars, '#f97316');
+  assert.equal(todo.length, 3);
+  assert.equal(progress.length, 3);
+  todo.forEach((bar, index) => {
+    assert.ok(progress[index].x > bar.x);
+    assert.ok(progress[index].y > bar.y);
+    assert.ok(Math.abs((bar.y + bar.h) - (progress[index].y + progress[index].h)) < 0.2);
+  });
 
   const open = backlogChart(days.map((label, index) => ({ label, open: index === 23 ? 8 : 0 })));
   assert.match(open, /open-today/);
@@ -253,6 +286,18 @@ test('one day of status data is a stacked bar, and a full month uses daily bars'
   const created = throughputChart(days.map((label, index) => ({ label, created: index === 1 ? 6 : 0, completed: 0 })));
   assert.match(created, /<title>11-02: Created 6<\/title>/);
   assert.doesNotMatch(created, /11-24/);
+  const paired = throughputChart([
+    { label: '11-01', created: 4, completed: 2 },
+    { label: '11-02', created: 3, completed: 1 },
+  ]);
+  const made = barsOf(paired, '#d4d4d4');
+  const finished = barsOf(paired, '#f97316');
+  assert.equal(made.length, 2);
+  assert.equal(finished.length, 2);
+  made.forEach((bar, index) => {
+    assert.ok(finished[index].x > bar.x);
+    assert.ok(Math.abs((bar.y + bar.h) - (finished[index].y + finished[index].h)) < 0.2);
+  });
 });
 
 test('the month stepper stays between the first task and the current month', () => {

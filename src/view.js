@@ -916,9 +916,9 @@ function flowSubtitle(cfd) {
     ['review', 'Review'],
     ['done', 'Done'],
   ].filter(([key]) => (cfd?.[key] || []).some((value) => value > 0)).map(([, label]) => label);
-  if (!names.length) return 'Each bar is one day in the selected month, up to today.';
+  if (!names.length) return 'Side-by-side bars for each day in the selected month, up to today.';
   const list = names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
-  return `Each bar is one day, up to today. ${list}.`;
+  return `${list} side by side for each day, up to today.`;
 }
 
 export function renderManage({ user, csrf, msg, board, projects }) {
