@@ -315,7 +315,7 @@ function options(pairs, selected, blank) {
   return html.join('');
 }
 
-function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, from, autofocus = true }) {
+function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, from, autofocus = true, split = false, metaHtml = '' }) {
   const value = task || {};
   const projectName = value.project_name || '';
   const due = value.due_date || '';
@@ -340,7 +340,6 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
         </label>
         <label class="field"><span>Description</span>
           <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
-          ${value.description ? `<div class="desc-preview">${highlightMentions(value.description, users)}</div>` : ''}
         </label>
       </section>
       <section class="form-card">
@@ -385,8 +384,62 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
         </div>
       </section>
     </div>
-    ${canEdit ? `<div class="form-footer">${value.id ? '' : '<button class="btn btn-line" type="submit" name="again" value="1">Save & add another</button>'}<button class="btn btn-primary" type="submit">Save</button></div>` : ''}
+    ${canEdit && !split ? `<div class="form-footer">${value.id ? '' : '<button class="btn btn-line" type="submit" name="again" value="1">Save & add another</button>'}<button class="btn btn-primary" type="submit">Save</button></div>` : ''}
   `;
+  if (split) {
+    const action = task?.id ? `/tasks/${value.id}` : '/tasks';
+    const body = `
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      ${from ? `<input type="hidden" name="from" value="${esc(from)}">` : ''}
+      <section class="form-card task-details">
+        <h2>Details</h2>
+        <label class="field"><span>Title</span>
+          <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit && autofocus ? 'autofocus' : ''}>
+        </label>
+        <label class="field"><span>Description</span>
+          <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
+        </label>
+      </section>
+      <aside class="task-side">
+        <section class="form-card">
+          <h2>Task</h2>
+          <div class="pair">
+            <label class="field"><span>Project</span>
+              <span class="combo">
+                <input name="project_name" value="${esc(projectName)}" placeholder="Search or create project" autocomplete="off" data-project-input ${off}>
+                <input type="hidden" name="project_id" value="${esc(value.project_id || '')}" data-project-id>
+              </span>
+            </label>
+            <div class="field" data-assignee-field>
+              <div class="label-row"><span>Assignees</span>${canEdit && currentUser ? `<button class="assign-link" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}</div>
+              <div class="assignee-chips" data-assignee-chips>${(value.assignees || []).map((person) => `<span class="assignee-chip" data-id="${person.id}">${swatch(person.color, person.id, person.name)}${esc(person.name)}<button type="button" data-remove-assignee aria-label="Remove ${esc(person.name)}">×</button></span>`).join('')}</div>
+              <input type="hidden" name="assignee_ids" value="${esc((value.assignee_ids || []).join(','))}" data-assignee-ids>
+              <input class="assignee-search" placeholder="Search people" autocomplete="off" data-assignee-search ${off}>
+            </div>
+          </div>
+          <div class="field">
+            <span>Status</span>
+            <input type="hidden" name="status" value="${esc(status)}" data-status-input>
+            <div class="segments">${segments(STATUSES, status, 'data-status')}</div>
+          </div>
+          <div class="field">
+            <span>Priority</span>
+            <input type="hidden" name="priority" value="${esc(value.priority || '')}" data-priority-input>
+            <div class="segments">${segments([['', 'None'], ...PRIORITIES], value.priority || '', 'data-priority')}</div>
+          </div>
+          <div class="field">
+            <span>Due</span>
+            <div class="due-row">
+              <div class="chips">${chips.map(([, label, date]) => `<button type="button" class="chip${due === date ? ' on' : ''}" data-due="${esc(date)}" ${off}>${label}</button>`).join('')}</div>
+              <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
+            </div>
+          </div>
+          ${metaHtml}
+        </section>
+      </aside>`;
+    if (!canEdit) return `<div class="task-form is-readonly">${body}</div>`;
+    return `<form id="task-edit" class="task-form task-edit" method="post" action="${action}">${body}</form>`;
+  }
   if (!canEdit) return `<div class="task-form is-readonly">${fields}</div>`;
   const action = task?.id ? `/tasks/${value.id}` : '/tasks';
   return `<form class="task-form" method="post" action="${action}">${fields}</form>`;
@@ -665,12 +718,14 @@ function kudosButton({ csrf, type, id, count = 0, mine = false, back }) {
 export function renderTask({ user, csrf, msg, task, comments, users, projects, activity = [], attachments = [], grokFiles = [], grokWait = null, timer = null, canEdit, canDelete, canComplete, commentPerms, commentKudos, taskKudos, today, toast }) {
   const isNew = !task?.id;
   const title = isNew ? 'New task' : task.title;
+  const editable = isNew || canEdit;
   const meta = !isNew
     ? `<p class="meta">Created by ${nameLine(task.creator_name || 'Unknown', task.creator_color, task.created_by)} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${nameLine(task.reviewer_name, task.reviewer_color, task.reviewer_id)}</p>` : ''}`
     : '';
-  const pageActions = !isNew
-    ? `<div class="title-actions">${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? rowStatusActions(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`
+  const saveButtons = editable
+    ? `${isNew ? '<button class="btn btn-line" type="submit" form="task-edit" name="again" value="1">Save & add another</button>' : ''}<button class="btn btn-primary" type="submit" form="task-edit">Save</button>`
     : '';
+  const pageActions = `<div class="title-actions">${!isNew ? `${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? rowStatusActions(task, user, csrf, `/tasks/${task.id}`, true) : ''}${task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}` : ''}${saveButtons}</div>`;
   const commentBlock = isNew
     ? ''
     : `<section class="panel pad">
@@ -719,8 +774,9 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     crumb: `<a href="/">Tasks</a> <span class="sep">›</span> <span class="crumb-current">${esc(title)}</span>`,
     body: `
       <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
-      ${meta}
-      ${taskForm({ task, users, projects, csrf, canEdit: isNew || canEdit, currentUser: user, today })}
+      <div class="task-layout">
+      ${taskForm({ task, users, projects, csrf, canEdit: editable, currentUser: user, today, split: true, metaHtml: meta })}
+      <div class="task-rest">
       ${renderTimer(task, csrf, timer)}
       ${isNew ? '' : `<section class="panel pad">
         <h2>Files</h2>
@@ -746,6 +802,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         ${activity.length ? activity.map((item) => `<p class="activity"><strong>${esc(item.actor_name)}</strong> ${esc(item.detail)} <time>${esc(formatDateTime(item.created_at))}</time></p>`).join('') : '<p class="hint">No history yet.</p>'}
       </section>`}
       ${commentBlock}
+      </div>
+      </div>
       ${projectScript(projects)}
       ${isNew ? '' : reviewDialog(csrf)}`,
   });

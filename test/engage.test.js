@@ -95,7 +95,8 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.match(mentions.text, /nav-badge/);
     const opened = await page(base, thabang, `/tasks/${taskId}`);
     assert.doesNotMatch(opened.text, /nav-badge/);
-    assert.match(opened.text, /class="mention"/);
+    assert.equal(opened.text.includes('desc-preview'), false);
+    assert.match(opened.text, /@\[Thabang Madikgetla\]\(/);
     assert.match(opened.text, /Thabang Madikgetla/);
 
     const board = await page(base, thabang, '/');

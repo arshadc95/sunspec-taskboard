@@ -541,6 +541,47 @@ tr.task-row:hover td { background: #fff7ed; }
   bottom: 0;
 }
 .form-footer { justify-content: flex-end; }
+.task-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.task-layout > .task-form { display: contents; }
+.task-details { grid-column: 1; grid-row: 1; }
+.task-side { grid-column: 2; grid-row: 1 / span 2; min-width: 0; }
+.task-rest { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.task-layout .form-card h2,
+.task-layout .panel > h2 {
+  padding: 6px 12px;
+  font-size: 11px;
+  margin: 0;
+}
+.task-layout .form-card > .field { padding: 8px 12px; }
+.task-layout .form-card > .pair { padding: 0; }
+.task-layout .task-side .pair { grid-template-columns: 1fr; gap: 0; }
+.task-layout .task-form input:not([type="hidden"]),
+.task-layout .task-form select {
+  height: 32px;
+}
+.task-layout .title-input { font-size: 16px; }
+.task-layout textarea[name="description"] { min-height: 96px; padding: 6px 10px; line-height: 1.4; }
+.task-layout .segments,
+.task-layout .chips { width: 100%; }
+.task-layout .seg,
+.task-layout .chip { height: 32px; flex: 1 1 0; font-size: 11px; padding: 0 4px; }
+.task-layout .due-row { flex-direction: column; align-items: stretch; gap: 8px; }
+.task-layout .due-row .chips { flex-wrap: wrap; }
+.task-layout .due-row input[type="date"] { width: 100%; flex: none; }
+.task-layout .meta { margin: 0; padding: 0 12px 10px; line-height: 1.4; }
+.task-layout .panel.pad { padding-bottom: 8px; }
+.task-layout .comment { padding: 6px 0; }
+.title-actions .btn { height: 32px; padding: 0 10px; }
+@media (max-width: 800px) {
+  .task-layout { grid-template-columns: 1fr; }
+  .task-details, .task-side, .task-rest { grid-column: 1; grid-row: auto; }
+  .content:has(.task-layout) { padding-right: 64px; padding-bottom: 96px; }
+}
 .form-footer .btn { height: 36px; flex: 0 0 auto; min-width: 140px; border-radius: 0; font-weight: 700; }
 .form-footer .btn-primary { background: #f97316; border-color: #f97316; color: #fff; }
 .form-footer .btn-line { background: #fff; color: #111; border: 1px solid #111; }

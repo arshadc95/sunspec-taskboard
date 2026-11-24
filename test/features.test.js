@@ -132,6 +132,10 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     const detail = await page(base, admin.cookies, `/tasks/${taskId}`);
     assert.match(detail.text, /Status: To Do → Review/);
     assert.match(detail.text, /Created the task/);
+    assert.equal(detail.text.includes('desc-preview'), false);
+    assert.equal((detail.text.match(/Fit the meter/g) || []).length, 1);
+    assert.match(detail.text, /class="task-layout"/);
+    assert.match(detail.text, /form="task-edit"/);
 
     await post(base, admin.cookies, `/tasks/${taskId}/comments`, {
       _csrf: form.csrf,
