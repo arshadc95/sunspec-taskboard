@@ -169,8 +169,10 @@ function numericId(value) {
 
 function assigneeChoices(db, task) {
   const users = listActiveUsers(db);
-  if (task?.assignee_id && !users.some((user) => user.id === task.assignee_id)) {
-    const extra = getUser(db, task.assignee_id);
+  const ids = task?.assignee_ids?.length ? task.assignee_ids : (task?.assignee_id ? [task.assignee_id] : []);
+  for (const id of ids) {
+    if (users.some((user) => user.id === id)) continue;
+    const extra = getUser(db, id);
     if (extra) users.push(extra);
   }
   return users;
@@ -182,17 +184,20 @@ function parseTask(body, users) {
   const status = String(body.status || '');
   const priorityRaw = String(body.priority || '');
   const due = String(body.due_date || '').trim();
-  const assigneeRaw = String(body.assignee_id || '').trim();
   if (!title || title.length > 200) return { error: 'invalid' };
   if (description.length > 20000) return { error: 'invalid' };
   if (!STATUSES.some(([value]) => value === status)) return { error: 'invalid' };
   if (priorityRaw && !PRIORITIES.some(([value]) => value === priorityRaw)) return { error: 'invalid' };
   if (due && !isValidDate(due)) return { error: 'invalid' };
-  let assigneeId = null;
-  if (assigneeRaw) {
-    const id = Number(assigneeRaw);
+  const rawIds = body.assignee_ids !== undefined && String(body.assignee_ids).trim() !== ''
+    ? String(body.assignee_ids).split(',')
+    : (String(body.assignee_id || '').trim() ? [String(body.assignee_id).trim()] : []);
+  const assigneeIds = [];
+  for (const raw of rawIds) {
+    const id = Number(String(raw).trim());
+    if (!id) continue;
     if (!users.some((user) => user.id === id)) return { error: 'invalid' };
-    assigneeId = id;
+    if (!assigneeIds.includes(id)) assigneeIds.push(id);
   }
   return {
     title,
@@ -200,7 +205,8 @@ function parseTask(body, users) {
     status,
     priority: priorityRaw || null,
     dueDate: due || null,
-    assigneeId,
+    assigneeId: assigneeIds[0] || null,
+    assigneeIds,
   };
 }
 
@@ -508,6 +514,7 @@ export function createApp(config) {
     const quick = req.body.quick === '1';
     if (quick && !parsed.title) return res.redirect('/?msg=invalid');
     const id = createTask(db, { ...parsed, projectId, createdBy: req.user.id });
+    notifyMentions(db, { taskId: id, userIds: (parsed.assigneeIds || []).filter((userId) => userId !== req.user.id), actorId: req.user.id });
     rememberMentions(db, id, `${parsed.title}\n${parsed.description}`, req.user.id);
     addActivity(db, { taskId: id, actorId: req.user.id, action: 'created', detail: 'Created the task' });
     if (quick || req.body.from === 'board') {
@@ -572,6 +579,8 @@ export function createApp(config) {
     const projectId = projectFromBody(db, req.body, task.project_id);
     if (projectId === false) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     const updated = updateTask(db, task.id, { ...parsed, projectId });
+    const added = (updated?.assignee_ids || []).filter((userId) => !(task.assignee_ids || []).includes(userId) && userId !== req.user.id);
+    notifyMentions(db, { taskId: task.id, userIds: added, actorId: req.user.id });
     logTaskChanges(db, req.user, task, updated);
     rememberMentions(db, task.id, `${parsed.title}\n${parsed.description}`, req.user.id);
     res.redirect(`/tasks/${task.id}?msg=saved`);
@@ -1225,8 +1234,9 @@ function logTaskChanges(db, actor, before, after) {
   if (before.status !== after.status) {
     changes.push(['status', `Status: ${labelOf(STATUSES, before.status)} → ${labelOf(STATUSES, after.status)}`]);
   }
-  if ((before.assignee_id || null) !== (after.assignee_id || null)) {
-    changes.push(['assignee', `Assignee: ${personName(db, before.assignee_id)} → ${personName(db, after.assignee_id)}`]);
+  const assigneeText = (task) => (task.assignees || []).map((person) => person.name).join(', ') || 'Unassigned';
+  if (assigneeText(before) !== assigneeText(after)) {
+    changes.push(['assignee', `Assignee: ${assigneeText(before)} → ${assigneeText(after)}`]);
   }
   if ((before.due_date || '') !== (after.due_date || '')) {
     changes.push(['due', `Due: ${formatDue(before.due_date)} → ${formatDue(after.due_date)}`]);

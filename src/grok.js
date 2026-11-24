@@ -141,6 +141,23 @@ function actingUser(db, req, res) {
   return user;
 }
 
+function readAssigneeIds(body, users) {
+  const hasList = body.assignee_ids !== undefined;
+  const hasOne = body.assignee_id !== undefined;
+  if (!hasList && !hasOne) return { ids: [] };
+  const raw = hasList
+    ? (Array.isArray(body.assignee_ids) ? body.assignee_ids : String(body.assignee_ids).split(','))
+    : (body.assignee_id ? [body.assignee_id] : []);
+  const ids = [];
+  for (const value of raw) {
+    if (value === '' || value === null) continue;
+    const id = Number(value);
+    if (!users.some((user) => user.id === id)) return { error: 'Unknown assignee' };
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return { ids };
+}
+
 function taskJson(task, comments) {
   const payload = {
     id: task.id,
@@ -149,7 +166,9 @@ function taskJson(task, comments) {
     status: task.status,
     priority: task.priority,
     due_date: task.due_date,
-    assignee_id: task.assignee_id,
+    assignee_id: (task.assignee_ids && task.assignee_ids[0]) || task.assignee_id || null,
+    assignee_ids: task.assignee_ids || [],
+    assignees: (task.assignees || []).map((person) => ({ id: person.id, name: person.name })),
     assignee: task.assignee_name || null,
     project_id: task.project_id,
     project: task.project_name || null,
@@ -281,16 +300,13 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
     } else if (String(req.body.project || '').trim()) {
       projectId = findOrCreateProject(db, String(req.body.project).trim());
     }
-    let assigneeId = null;
-    if (req.body.assignee_id) {
-      const person = listActiveUsers(db).find((user) => user.id === Number(req.body.assignee_id));
-      if (!person) return json(res, 400, { error: 'Unknown assignee' });
-      assigneeId = person.id;
-    }
+    const chosen = readAssigneeIds(req.body, listActiveUsers(db));
+    if (chosen.error) return json(res, 400, { error: chosen.error });
     const id = createTask(db, {
       title,
       description: String(req.body.description || ''),
-      assigneeId,
+      assigneeId: chosen.ids[0] || null,
+      assigneeIds: chosen.ids,
       status,
       priority,
       dueDate: due || null,
@@ -317,13 +333,12 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
       : String(req.body.due_date ?? req.body.due ?? '').trim();
     if (due && !isValidDate(due)) return json(res, 400, { error: 'due must be YYYY-MM-DD' });
     let assigneeId = task.assignee_id;
-    if (req.body.assignee_id !== undefined) {
-      if (!req.body.assignee_id) assigneeId = null;
-      else {
-        const person = listActiveUsers(db).find((user) => user.id === Number(req.body.assignee_id));
-        if (!person) return json(res, 400, { error: 'Unknown assignee' });
-        assigneeId = person.id;
-      }
+    let assigneeIds;
+    if (req.body.assignee_ids !== undefined || req.body.assignee_id !== undefined) {
+      const chosen = readAssigneeIds(req.body, listActiveUsers(db));
+      if (chosen.error) return json(res, 400, { error: chosen.error });
+      assigneeIds = chosen.ids;
+      assigneeId = chosen.ids[0] || null;
     }
     let projectId = task.project_id;
     if (req.body.project_id !== undefined || req.body.project !== undefined) {
@@ -341,6 +356,7 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
       title,
       description: req.body.description === undefined ? task.description : String(req.body.description),
       assigneeId,
+      assigneeIds,
       status,
       priority,
       dueDate: due || null,

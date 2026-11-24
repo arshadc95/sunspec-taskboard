@@ -109,6 +109,17 @@ document.querySelectorAll('[data-close-drawer]').forEach((button) => {
   button.addEventListener('click', () => drawer?.close());
 });
 if (drawer?.hasAttribute('data-open')) openDrawer();
+drawer?.addEventListener('click', (event) => {
+  if (event.target === drawer) drawer.close();
+});
+document.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      input.form?.requestSubmit();
+    }
+  });
+});
 document.addEventListener('keydown', (event) => {
   const typing = event.target.closest('input, textarea, select');
   if (event.key === 'n' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -143,16 +154,81 @@ document.querySelectorAll('[data-due]').forEach((button) => {
   });
 });
 
+function syncAssignees(field) {
+  const hidden = field.querySelector('[data-assignee-ids]');
+  if (hidden) hidden.value = [...field.querySelectorAll('.assignee-chip')].map((chip) => chip.dataset.id).join(',');
+}
+function addAssignee(field, id, name) {
+  const chips = field.querySelector('[data-assignee-chips]');
+  if (!chips || chips.querySelector(`[data-id="${id}"]`)) return;
+  const chip = document.createElement('span');
+  chip.className = 'assignee-chip';
+  chip.dataset.id = String(id);
+  chip.append(document.createTextNode(name));
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.dataset.removeAssignee = '';
+  remove.setAttribute('aria-label', `Remove ${name}`);
+  remove.textContent = '×';
+  remove.addEventListener('click', () => { chip.remove(); syncAssignees(field); });
+  chip.append(remove);
+  chips.append(chip);
+  syncAssignees(field);
+}
+document.querySelectorAll('[data-remove-assignee]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const field = button.closest('[data-assignee-field]');
+    button.closest('.assignee-chip')?.remove();
+    if (field) syncAssignees(field);
+  });
+});
 document.querySelectorAll('[data-assign-me]').forEach((button) => {
   button.addEventListener('click', () => {
-    const field = button.closest('.field');
+    const field = button.closest('[data-assignee-field]');
     const id = button.getAttribute('data-assign-me');
-    const hidden = field?.querySelector('[data-user-id]');
-    const text = field?.querySelector('[data-user-input]');
     const person = readJson('people-data').find((item) => String(item.id) === String(id));
-    if (hidden) hidden.value = id;
-    if (text && person) text.value = person.name;
+    if (field && person) addAssignee(field, person.id, person.name);
   });
+});
+document.querySelectorAll('[data-assignee-search]').forEach((input) => {
+  const field = input.closest('[data-assignee-field]');
+  const menu = document.createElement('div');
+  menu.className = 'combo-menu';
+  menu.hidden = true;
+  input.parentElement?.append(menu);
+  let index = 0;
+  const render = () => {
+    const query = input.value.trim().toLowerCase();
+    const taken = new Set([...field.querySelectorAll('.assignee-chip')].map((chip) => chip.dataset.id));
+    const matches = readJson('people-data').filter((item) => !taken.has(String(item.id)) && item.name.toLowerCase().includes(query)).slice(0, 8);
+    menu.innerHTML = '';
+    matches.forEach((item, itemIndex) => {
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.textContent = item.name;
+      if (itemIndex === index) choice.classList.add('active');
+      choice.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        addAssignee(field, item.id, item.name);
+        input.value = '';
+        menu.hidden = true;
+      });
+      menu.append(choice);
+    });
+    menu.hidden = matches.length === 0;
+  };
+  input.addEventListener('input', () => { index = 0; render(); });
+  input.addEventListener('focus', render);
+  input.addEventListener('keydown', (event) => {
+    const buttons = [...menu.querySelectorAll('button')];
+    if (event.key === 'ArrowDown') { event.preventDefault(); index = Math.min(buttons.length - 1, index + 1); render(); }
+    if (event.key === 'ArrowUp') { event.preventDefault(); index = Math.max(0, index - 1); render(); }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (!menu.hidden && buttons[index]) buttons[index].dispatchEvent(new MouseEvent('mousedown'));
+    }
+  });
+  input.addEventListener('blur', () => { window.setTimeout(() => { menu.hidden = true; }, 150); });
 });
 
 function attachCombo(input, hidden, items, label) {

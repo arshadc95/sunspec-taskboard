@@ -289,28 +289,31 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
       </section>
       <section class="form-card">
         <h2>Assignment</h2>
+        <div class="pair">
         <label class="field"><span>Project</span>
           <span class="combo">
             <input name="project_name" value="${esc(projectName)}" placeholder="Search or create project" autocomplete="off" data-project-input ${off}>
             <input type="hidden" name="project_id" value="${esc(value.project_id || '')}" data-project-id>
           </span>
         </label>
-        <div class="field">
-          <div class="label-row"><span>Assignee</span>${canEdit && currentUser ? `<button class="assign-link" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}</div>
-          <span class="combo">
-            <input value="${esc(value.assignee_name || '')}" placeholder="Search people" autocomplete="off" data-user-input ${off}>
-            <input type="hidden" name="assignee_id" value="${esc(value.assignee_id || '')}" data-user-id>
-          </span>
+        <div class="field" data-assignee-field>
+          <div class="label-row"><span>Assignees</span>${canEdit && currentUser ? `<button class="assign-link" type="button" data-assign-me="${currentUser.id}">Assign to me</button>` : ''}</div>
+          <div class="assignee-chips" data-assignee-chips>${(value.assignees || []).map((person) => `<span class="assignee-chip" data-id="${person.id}">${esc(person.name)}<button type="button" data-remove-assignee aria-label="Remove ${esc(person.name)}">×</button></span>`).join('')}</div>
+          <input type="hidden" name="assignee_ids" value="${esc((value.assignee_ids || []).join(','))}" data-assignee-ids>
+          <input class="assignee-search" placeholder="Search people" autocomplete="off" data-assignee-search ${off}>
+        </div>
         </div>
       </section>
       <section class="form-card">
         <h2>Status</h2>
         <div class="field">
+          <span>Status</span>
           <input type="hidden" name="status" value="${esc(status)}" data-status-input>
           <div class="segments">${segments(STATUSES, status, 'data-status')}</div>
         </div>
         <h2>Priority</h2>
         <div class="field">
+          <span>Priority</span>
           <input type="hidden" name="priority" value="${esc(value.priority || '')}" data-priority-input>
           <div class="segments">${segments([['', 'None'], ...PRIORITIES], value.priority || '', 'data-priority')}</div>
         </div>
@@ -318,6 +321,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
       <section class="form-card">
         <h2>Due date</h2>
         <div class="field">
+          <span>Due</span>
           <div class="due-row">
             <div class="chips">${chips.map(([, label, date]) => `<button type="button" class="chip${due === date ? ' on' : ''}" data-due="${esc(date)}" ${off}>${label}</button>`).join('')}</div>
             <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
@@ -325,7 +329,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
         </div>
       </section>
     </div>
-    ${canEdit ? `<div class="form-footer"><button class="btn btn-primary" type="submit">Save</button>${value.id ? '' : '<button class="btn btn-line" type="submit" name="again" value="1">Save & add another</button>'}</div>` : ''}
+    ${canEdit ? `<div class="form-footer">${value.id ? '' : '<button class="btn btn-line" type="submit" name="again" value="1">Save & add another</button>'}<button class="btn btn-primary" type="submit">Save</button></div>` : ''}
   `;
   if (!canEdit) return `<div class="task-form is-readonly">${fields}</div>`;
   const action = task?.id ? `/tasks/${value.id}` : '/tasks';
@@ -343,6 +347,13 @@ function timerMark(task, user) {
   const names = running.map((row) => row.user_name).join(', ');
   const mine = running.some((row) => row.user_id === user.id);
   return `<span class="dot${mine ? ' mine' : ''}" title="Timer running: ${esc(names)}">●</span> `;
+}
+
+function assigneeCell(task) {
+  const names = (task.assignees || []).map((person) => person.name);
+  if (!names.length) return '—';
+  if (names.length === 1) return esc(names[0]);
+  return `<span title="${esc(names.join(', '))}">${esc(names[0])} +${names.length - 1}</span>`;
 }
 
 function isAssignee(task, user) {
@@ -414,7 +425,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
   return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}" data-href="/tasks/${task.id}">
     <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a></td>
     <td>${esc(task.project_name || '—')}</td>
-    <td>${esc(task.assignee_name || '—')}</td>
+    <td>${assigneeCell(task)}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
     <td class="due">${esc(formatDue(task.due_date))}</td>

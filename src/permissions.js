@@ -9,10 +9,16 @@ export function canEditUser(actor, target) {
   return false;
 }
 
+function isAssignee(actor, task) {
+  if (!actor || !task) return false;
+  if (Array.isArray(task.assignee_ids) && task.assignee_ids.includes(actor.id)) return true;
+  return task.assignee_id === actor.id;
+}
+
 export function canEditTask(actor, task) {
   if (!actor || !task) return false;
   if (actor.role === 'superuser' || actor.role === 'admin') return true;
-  return task.created_by === actor.id || task.assignee_id === actor.id;
+  return task.created_by === actor.id || isAssignee(actor, task);
 }
 
 export function canRemoveTask(actor, task) {
@@ -24,11 +30,11 @@ export function canRemoveTask(actor, task) {
 export function canCompleteTask(actor, task) {
   if (!actor || !task) return false;
   if (actor.role === 'superuser' || actor.role === 'admin') return true;
-  return task.created_by === actor.id || task.assignee_id === actor.id;
+  return task.created_by === actor.id || isAssignee(actor, task);
 }
 
 export function canControlTimer(actor, task) {
-  return Boolean(actor && task && task.assignee_id === actor.id);
+  return isAssignee(actor, task);
 }
 
 export function canDeleteComment(actor, comment) {

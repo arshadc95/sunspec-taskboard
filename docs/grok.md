@@ -41,7 +41,7 @@ Chat:
     "users": [{ "id": 4, "name": "Lindi Nkosi" }],
     "projects": [{ "id": 2, "name": "Site" }],
     "tasks": [
-      { "id": 18, "title": "Replace the inverter fan", "status": "in_progress", "assignee_id": 5, "due": "2026-11-25", "priority": "high" }
+      { "id": 18, "title": "Replace the inverter fan", "status": "in_progress", "assignee_id": 5, "assignee_ids": [5, 6], "due": "2026-11-25", "priority": "high" }
     ]
   },
   "board_url": "https://tasks.sunspec.co.za/"
@@ -71,7 +71,7 @@ Comment (`thread_id` is omitted; `task` is included):
     "users": [{ "id": 4, "name": "Lindi Nkosi" }],
     "projects": [{ "id": 2, "name": "Site" }],
     "tasks": [
-      { "id": 18, "title": "Replace the inverter fan", "status": "in_progress", "assignee_id": 5, "due": "2026-11-25", "priority": "high" }
+      { "id": 18, "title": "Replace the inverter fan", "status": "in_progress", "assignee_id": 5, "assignee_ids": [5, 6], "due": "2026-11-25", "priority": "high" }
     ]
   },
   "board_url": "https://tasks.sunspec.co.za/tasks/18"
@@ -80,7 +80,7 @@ Comment (`thread_id` is omitted; `task` is included):
 
 `recent_context` is the last 10 messages. Chat roles are `user` or `grok`. Comment roles are the author's name. `files` lists PDFs attached to that message. `thread_id` is the chat. A person can keep several chats; the first message's first 40 characters becomes the title until they rename it.
 
-`board_snapshot` is the same on chat and comment webhooks. `users` is active people (`id`, `name`). `projects` is `id` and `name`. `tasks` is open work only (not Done, not removed): `id`, `title`, `status`, `assignee_id`, `due`, `priority`, at most 100, most recently updated first. Done tasks are left out so the bot can answer from this list without another call.
+`board_snapshot` is the same on chat and comment webhooks. `users` is active people (`id`, `name`). `projects` is `id` and `name`. `tasks` is open work only (not Done, not removed): `id`, `title`, `status`, `assignee_id` (the first assignee), `assignee_ids` (everyone assigned), `due`, `priority`, at most 100, most recently updated first. Done tasks are left out so the bot can answer from this list without another call.
 
 People attach PDFs in the Grok chat only, with the paperclip button. A comment that mentions `@Grok` is text. The bot can still attach a generated PDF to a chat reply or a task. Files are checked by the `%PDF` magic bytes. At most 5 files, 15 MB each. They are stored under `DATA_DIR/grok-files` with a random name. The row records `stored_name`, and `message_id` or `comment_id`, so the file can be downloaded and shown on the reply. Those two columns are how the file is found; they are not part of the webhook.
 
@@ -152,6 +152,6 @@ Signed-in people download their own chat files, and any PDF on a task they can o
 
 Nginx in front of the app must allow the upload: `client_max_body_size 80m`. Update the file that is actually enabled on the VPS, then reload nginx. The copies in `deploy/` already say 80m.
 
-`PATCH` accepts `title`, `description`, `assignee_id`, `status`, `priority`, `due` or `due_date`, and `project` or `project_id`.
+`POST` and `PATCH` accept `assignee_ids` (an array of user ids) and still accept a single `assignee_id`. `GET` task payloads include `assignee_id`, `assignee_ids`, and `assignees` (`id` and `name`). `PATCH` also accepts `title`, `description`, `status`, `priority`, `due` or `due_date`, and `project` or `project_id`.
 
 Nginx on `tasks.sunspec.co.za` proxies `/api/bot/` to the app on `127.0.0.1:8082`. The bearer token is the access control.

@@ -459,6 +459,94 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
   }
 });
 
+test('a task can have several assignees', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-assignees-'));
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'board.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+    botApiToken: 'test-bot-token',
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const users = await page(base, admin, '/users');
+    await post(base, admin, '/users', { _csrf: users.csrf, name: 'Lindi Nkosi', email: 'lindi@example.com', password: 'lindi-password', role: 'user' });
+    await post(base, admin, '/users', { _csrf: users.csrf, name: 'Thabang Madikgetla', email: 'thabang@example.com', password: 'thabang-password', role: 'user' });
+    const lindi = db.prepare("SELECT id FROM users WHERE email = 'lindi@example.com'").get().id;
+    const thabang = db.prepare("SELECT id FROM users WHERE email = 'thabang@example.com'").get().id;
+    const arshad = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
+    const created = await fetch(`${base}/api/bot/tasks`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshad, title: 'Shared job', assignee_ids: [lindi, thabang] }),
+    });
+    const payload = await created.json();
+    assert.equal(created.status, 201);
+    assert.deepEqual(payload.task.assignee_ids.sort(), [lindi, thabang].sort());
+    assert.equal(payload.task.assignees.length, 2);
+    const taskId = payload.task.id;
+    const board = await page(base, admin, '/');
+    assert.match(board.text, /Shared job/);
+    assert.match(board.text, /\+1/);
+    const mine = await page(base, await login(base, 'thabang@example.com', 'thabang-password'), '/?mine=1');
+    assert.match(mine.text, /Shared job/);
+    const lindiCookies = await login(base, 'lindi@example.com', 'lindi-password');
+    const done = await fetch(`${base}/api/bot/complete/${taskId}`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: lindi }),
+    });
+    assert.equal(done.status, 200);
+    const single = await fetch(`${base}/api/bot/tasks`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshad, title: 'Solo job', assignee_id: thabang }),
+    });
+    const solo = await single.json();
+    assert.equal(solo.task.assignee_ids[0], thabang);
+    const filtered = await fetch(`${base}/api/bot/tasks?assignee=${thabang}`, {
+      headers: { authorization: 'Bearer test-bot-token' },
+    });
+    const filteredTasks = (await filtered.json()).tasks.map((task) => task.title);
+    assert.equal(filteredTasks.includes('Shared job'), true);
+    assert.equal(filteredTasks.includes('Solo job'), true);
+    const cleared = await fetch(`${base}/api/bot/tasks/${solo.task.id}`, {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshad, assignee_ids: [] }),
+    });
+    assert.deepEqual((await cleared.json()).task.assignee_ids, []);
+    const footer = board.text.slice(board.text.indexOf('form-footer'));
+    assert.equal(footer.indexOf('Save &amp; add another') < footer.indexOf('>Save<'), true);
+    assert.match(board.text, /name="assignee_ids"/);
+    assert.match(board.text, /id="task-drawer"/);
+    const css = await fetch(`${base}/styles.css`);
+    const sheet = await css.text();
+    assert.match(sheet, /#task-drawer\.drawer[\s\S]*width: min\(640px/);
+    assert.match(sheet, /#task-drawer::backdrop \{ background: rgba\(0, 0, 0, 0\.5\)/);
+    const now = new Date().toISOString();
+    const legacy = db.prepare(`
+      INSERT INTO tasks (title, description, assignee_id, status, created_by, created_at, updated_at)
+      VALUES ('Legacy job', '', ?, 'todo', ?, ?, ?)
+    `).run(lindi, arshad, now, now);
+    const reopened = openDatabase(path.join(dir, 'board.sqlite'));
+    const link = reopened.prepare('SELECT user_id FROM task_assignees WHERE task_id = ?').get(legacy.lastInsertRowid);
+    assert.equal(link.user_id, lindi);
+    reopened.close();
+    assert.equal(lindiCookies.header().includes('sid'), true);
+  } finally {
+    server.close();
+  }
+});
+
 test('old grok threads lose the one-chat unique constraint', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-grok-migrate-'));
   const file = path.join(dir, 'old.sqlite');
