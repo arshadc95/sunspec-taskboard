@@ -36,6 +36,28 @@ export function grokShouldQueue({ sending = false, pending = false, queued = 0 }
   return Boolean(sending || pending || queued > 0);
 }
 
+export function grokFileView(file) {
+  const name = String(file?.filename || '').trim() || 'file.pdf';
+  const size = Number(file?.size) || 0;
+  const sizeLabel = size < 1024
+    ? `${size} B`
+    : size < 1024 * 1024
+      ? `${Math.max(1, Math.round(size / 1024))} KB`
+      : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  const id = file?.id;
+  return {
+    name,
+    sizeLabel,
+    expiry: file?.expired ? 'expired' : (file?.expires_label || ''),
+    openUrl: id ? `/files/${id}?inline=1` : '',
+    downloadUrl: id ? `/files/${id}` : '',
+  };
+}
+
+export function toggleGrokLayout(mode) {
+  return mode === 'full' ? 'panel' : 'full';
+}
+
 export function grokQueuedLabel(item) {
   const names = (item?.files || []).map((file) => file.name).filter(Boolean).join(', ');
   const body = [String(item?.text || '').trim(), names].filter(Boolean).join(' · ');

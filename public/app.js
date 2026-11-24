@@ -1,4 +1,4 @@
-import { acceptGrokFiles, applyGrokClick, grokQueuedLabel, grokShouldQueue } from './grok-panel.js';
+import { acceptGrokFiles, applyGrokClick, grokFileView, grokQueuedLabel, grokShouldQueue } from './grok-panel.js';
 import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
 document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
@@ -512,7 +512,9 @@ if (grokRoot) {
   const bubble = grokRoot.querySelector('.grok-bubble');
   const panel = grokRoot.querySelector('.grok-panel');
   const log = grokRoot.querySelector('[data-grok-log]');
-  const list = grokRoot.querySelector('[data-grok-list]');
+  const sidebar = grokRoot.querySelector('[data-grok-list]');
+  const list = grokRoot.querySelector('[data-grok-threads]');
+  const searchChats = grokRoot.querySelector('[data-grok-search]');
   const form = grokRoot.querySelector('[data-grok-form]');
   const picked = grokRoot.querySelector('[data-grok-picked]');
   const fileInput = form.querySelector('input[type="file"]');
@@ -523,6 +525,9 @@ if (grokRoot) {
   let listOpen = false;
   let connected = true;
   let threadId = null;
+  let threads = [];
+  let full = false;
+  try { full = localStorage.getItem('grok-layout') === 'full'; } catch { /* private mode */ }
   let chosen = [];
   let queue = [];
   let sending = false;
@@ -615,18 +620,51 @@ if (grokRoot) {
     return box;
   }
 
-  function fileNode(file) {
-    const line = document.createElement('p');
-    line.className = 'grok-file';
-    if (file.expired) {
-      line.textContent = `${file.filename} · expired`;
-      return line;
+  const viewer = grokRoot.querySelector('[data-grok-viewer]');
+  const viewerName = grokRoot.querySelector('[data-grok-viewer-name]');
+  const viewerFrame = grokRoot.querySelector('[data-grok-viewer-frame]');
+  const viewerDownload = grokRoot.querySelector('[data-grok-viewer-download]');
+  function openViewer(file) {
+    const view = grokFileView(file);
+    if (!view.openUrl || !viewer) return;
+    viewer.hidden = false;
+    if (viewerName) viewerName.textContent = view.name;
+    if (viewerFrame) viewerFrame.src = view.openUrl;
+    if (viewerDownload) {
+      viewerDownload.href = view.downloadUrl;
+      viewerDownload.setAttribute('download', view.name);
     }
-    const link = document.createElement('a');
-    link.href = `/files/${file.id}`;
-    link.textContent = file.filename;
-    line.append(link, document.createTextNode(` · ${file.expires_label}`));
-    return line;
+  }
+  function closeViewer() {
+    if (!viewer) return;
+    viewer.hidden = true;
+    if (viewerFrame) viewerFrame.removeAttribute('src');
+  }
+  function fileNode(file) {
+    const view = grokFileView(file);
+    const card = document.createElement('article');
+    card.className = 'grok-file-card';
+    const icon = document.createElement('span');
+    icon.className = 'grok-file-icon';
+    icon.textContent = 'PDF';
+    const meta = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = view.name;
+    const detail = document.createElement('p');
+    detail.textContent = [view.sizeLabel, view.expiry].filter(Boolean).join(' · ');
+    meta.append(title, detail);
+    const actions = document.createElement('div');
+    const openFile = document.createElement('button');
+    openFile.type = 'button';
+    openFile.textContent = 'Open';
+    openFile.addEventListener('click', () => openViewer(file));
+    const download = document.createElement('a');
+    download.href = view.downloadUrl;
+    download.setAttribute('download', view.name);
+    download.textContent = 'Download';
+    actions.append(openFile, download);
+    card.append(icon, meta, actions);
+    return card;
   }
 
   function paint(state) {
@@ -658,8 +696,20 @@ if (grokRoot) {
     });
     (state.files || []).forEach((file) => log.append(fileNode(file)));
     log.scrollTop = log.scrollHeight;
+    threads = state.threads || [];
+    renderThreads();
+    noteArrivals(state.waiting || []);
+    waitingCount = (state.waiting || []).length;
+    renderQueued();
+    if (!sending && !pending) flushQueue();
+  }
+
+  function renderThreads() {
+    if (!list) return;
+    const query = (searchChats?.value || '').trim().toLowerCase();
     list.innerHTML = '';
-    (state.threads || []).forEach((thread) => {
+    const shown = threads.filter((thread) => !query || String(thread.title || 'New chat').toLowerCase().includes(query));
+    shown.forEach((thread) => {
       const row = document.createElement('div');
       row.className = `grok-chat${thread.id === threadId ? ' is-current' : ''}`;
       const title = document.createElement('input');
@@ -673,7 +723,7 @@ if (grokRoot) {
       const openChat = document.createElement('button');
       openChat.type = 'button';
       openChat.textContent = 'Open';
-      openChat.addEventListener('click', () => { switchThread(thread.id); toggleList(false); });
+      openChat.addEventListener('click', () => { switchThread(thread.id); if (!full) toggleList(false); });
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = 'Delete';
@@ -681,16 +731,12 @@ if (grokRoot) {
       row.append(title, openChat, remove);
       list.append(row);
     });
-    if (!(state.threads || []).length) {
+    if (!shown.length) {
       const empty = document.createElement('p');
       empty.className = 'hint';
-      empty.textContent = 'No chats yet.';
+      empty.textContent = threads.length ? 'No matching chats.' : 'No chats yet.';
       list.append(empty);
     }
-    noteArrivals(state.waiting || []);
-    waitingCount = (state.waiting || []).length;
-    renderQueued();
-    if (!sending && !pending) flushQueue();
   }
 
   const pdfNote = grokRoot.querySelector('[data-grok-pdf-note]');
@@ -751,11 +797,38 @@ if (grokRoot) {
     timer = window.setInterval(() => { load().catch(() => {}); }, 3000);
   }
 
+  function syncLayout(collapseList) {
+    grokRoot.classList.toggle('is-full', full && open);
+    const button = grokRoot.querySelector('[data-grok-full]');
+    if (button) {
+      button.setAttribute('aria-pressed', full ? 'true' : 'false');
+      button.textContent = full ? 'Panel' : 'Full';
+    }
+    if (full && open && sidebar) {
+      listOpen = true;
+      sidebar.hidden = false;
+      sidebar.classList.add('is-open');
+    } else if (collapseList && sidebar) {
+      listOpen = false;
+      sidebar.classList.remove('is-open');
+      sidebar.hidden = true;
+    }
+  }
+
   function toggleList(force) {
+    if (full && open) {
+      listOpen = true;
+      if (sidebar) {
+        sidebar.hidden = false;
+        sidebar.classList.add('is-open');
+      }
+      return;
+    }
     listOpen = typeof force === 'boolean' ? force : !listOpen;
-    list.hidden = false;
-    list.classList.toggle('is-open', listOpen);
-    if (!listOpen) list.hidden = true;
+    if (!sidebar) return;
+    sidebar.hidden = false;
+    sidebar.classList.toggle('is-open', listOpen);
+    if (!listOpen) sidebar.hidden = true;
   }
 
   async function switchThread(id) {
@@ -790,6 +863,7 @@ if (grokRoot) {
   function setOpen(next) {
     open = next;
     panel.hidden = !open;
+    syncLayout();
     if (!open) {
       toggleList(false);
       watch();
@@ -812,7 +886,7 @@ if (grokRoot) {
     if (next !== open) setOpen(next);
   });
   grokRoot.querySelector('[data-grok-chats]').addEventListener('click', () => toggleList());
-  grokRoot.querySelector('[data-grok-new]').addEventListener('click', async () => {
+  async function createChat() {
     const response = await fetch('/api/grok/threads', {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
@@ -820,9 +894,19 @@ if (grokRoot) {
     });
     if (!response.ok) return;
     paint(await response.json());
-    toggleList(false);
+    if (!full) toggleList(false);
     watch();
+  }
+  grokRoot.querySelector('[data-grok-new]').addEventListener('click', createChat);
+  grokRoot.querySelector('[data-grok-new-side]')?.addEventListener('click', createChat);
+  grokRoot.querySelector('[data-grok-full]')?.addEventListener('click', () => {
+    full = !full;
+    try { localStorage.setItem('grok-layout', full ? 'full' : 'panel'); } catch { /* private mode */ }
+    if (full && !open) setOpen(true);
+    else syncLayout(!full);
   });
+  searchChats?.addEventListener('input', () => renderThreads());
+  grokRoot.querySelector('[data-grok-viewer-close]')?.addEventListener('click', closeViewer);
   grokRoot.querySelector('[data-grok-attach]').addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
     addFiles([...fileInput.files]);
@@ -933,7 +1017,8 @@ if (grokRoot) {
     localStorage.setItem('grok-sound', on ? '1' : '0');
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) seeThread(threadId); });
-  load().then(watch).catch(() => {});
+  if (full) setOpen(true);
+  else load().then(watch).catch(() => {});
 }
 
 const taskWait = document.querySelector('[data-grok-task]');

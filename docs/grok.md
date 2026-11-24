@@ -148,7 +148,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 `data` is the PDF as base64. A multipart upload uses the field name `file`. Either way the file is attached to the latest Grok reply in that chat, or the latest Grok comment on that task. `GET /api/bot/files/:id` downloads it until `GROK_FILE_TTL_HOURS` has passed.
 
-Signed-in people download their own chat files, and any PDF on a task they can open, at `/files/:id`.
+Signed-in people download their own chat files, and any PDF on a task they can open, at `/files/:id`. Add `?inline=1` to show that PDF in the page. A JSON upload can send `filename` or `name`. A blank name is stored as `file.pdf` and the file is still attached to the Grok reply.
 
 Nginx in front of the app must allow the upload: `client_max_body_size 80m`. Update the file that is actually enabled on the VPS, then reload nginx. The copies in `deploy/` already say 80m.
 

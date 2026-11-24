@@ -285,7 +285,7 @@ export function createApp(config) {
       'Referrer-Policy': 'same-origin',
       'X-DNS-Prefetch-Control': 'off',
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-      'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'",
+      'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; script-src 'self'; frame-src 'self'; object-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'",
     });
     next();
   });
@@ -894,10 +894,11 @@ export function createApp(config) {
     if (!full.startsWith(`${root}${path.sep}`) || !fs.existsSync(full)) {
       return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     }
-    const filename = row.filename.replace(/["\r\n]/g, '');
+    const filename = (row.filename || 'file.pdf').replace(/["\r\n]/g, '');
+    const disposition = req.query.inline === '1' ? 'inline' : 'attachment';
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename.replace(/[^\w.\- ]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`,
+      'Content-Disposition': `${disposition}; filename="${filename.replace(/[^\w.\- ]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(row.filename || 'file.pdf')}`,
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-store',
     });

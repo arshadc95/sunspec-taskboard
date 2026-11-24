@@ -78,8 +78,9 @@ export function isPdf(buffer) {
 }
 
 export function pdfFilename(name) {
-  const base = path.basename(String(name || 'file.pdf')).replace(/[^\w.\- ]+/g, '_').slice(0, 120);
-  return base.toLowerCase().endsWith('.pdf') ? base : `${base || 'file'}.pdf`;
+  const cleaned = path.basename(String(name || '').trim()).replace(/[^\w.\- ]+/g, '_').trim().slice(0, 120);
+  const base = cleaned || 'file.pdf';
+  return base.toLowerCase().endsWith('.pdf') ? base : `${base}.pdf`;
 }
 
 export function fileExpiry(row, now = Date.now()) {
@@ -88,7 +89,7 @@ export function fileExpiry(row, now = Date.now()) {
   const hours = expired ? 0 : Math.max(1, Math.ceil((exp - now) / 3600000));
   return {
     id: row.id,
-    filename: row.filename,
+    filename: String(row.filename || '').trim() || 'file.pdf',
     size: row.size,
     kind: row.kind,
     expires_at: row.expires_at,
@@ -242,7 +243,7 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
           fs.rmSync(req.file.path, { force: true });
           return json(res, 400, { error: 'Only PDF files can be attached.' });
         }
-        next({ stored: path.basename(req.file.filename), filename: pdfFilename(req.file.originalname), size: req.file.size });
+        next({ stored: path.basename(req.file.filename), filename: pdfFilename(req.body?.filename || req.body?.name || req.file.originalname), size: req.file.size });
       });
       return;
     }
@@ -253,7 +254,7 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
     if (!isPdf(buffer)) return json(res, 400, { error: 'Only PDF files can be attached.' });
     const stored = `${crypto.randomBytes(16).toString('hex')}.pdf`;
     fs.writeFileSync(path.join(grokDir, stored), buffer);
-    next({ stored, filename: pdfFilename(req.body.filename), size: buffer.length });
+    next({ stored, filename: pdfFilename(req.body.filename || req.body.name), size: buffer.length });
   }
 
   router.get('/tasks', (req, res) => {

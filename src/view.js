@@ -158,24 +158,44 @@ function grokWidget(user, csrf) {
         <strong>Grok</strong>
         <button type="button" data-grok-sound aria-pressed="true">Sound</button>
         <button type="button" data-grok-new>+ New chat</button>
+        <button type="button" data-grok-full aria-pressed="false" aria-label="Full screen">Full</button>
         <button type="button" data-grok-close aria-label="Close">×</button>
       </header>
-      <div class="grok-chats" data-grok-list hidden></div>
-      <div class="grok-log" data-grok-log></div>
-      <div class="grok-drop" data-grok-drop>Drop PDF for Grok</div>
-      <form class="grok-form" data-grok-form>
-        <div class="grok-picked" data-grok-picked></div>
-        <p class="grok-file-error" data-grok-file-error></p>
-        <p class="grok-pdf-note" data-grok-pdf-note hidden>Grok can read attached PDFs (max 5 × 15 MB, deleted after 24 h).</p>
-        <div class="grok-compose">
-          <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
-          <button type="button" class="grok-attach" data-grok-attach aria-label="Attach PDF">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </button>
-          <input type="file" accept="application/pdf,.pdf" multiple hidden>
-          <button type="submit">Send</button>
+      <div class="grok-body">
+        <div class="grok-chats" data-grok-list hidden>
+          <div class="grok-chat-tools">
+            <input class="grok-chat-search" data-grok-search placeholder="Search chats" aria-label="Search chats">
+            <button type="button" data-grok-new-side>+ New chat</button>
+          </div>
+          <div data-grok-threads></div>
         </div>
-      </form>
+        <div class="grok-stage">
+          <div class="grok-log" data-grok-log></div>
+          <form class="grok-form" data-grok-form>
+            <div class="grok-picked" data-grok-picked></div>
+            <p class="grok-file-error" data-grok-file-error></p>
+            <p class="grok-pdf-note" data-grok-pdf-note hidden>Grok can read attached PDFs (max 5 × 15 MB, deleted after 24 h).</p>
+            <div class="grok-compose">
+              <input name="text" maxlength="4000" placeholder="Message Grok" autocomplete="off">
+              <button type="button" class="grok-attach" data-grok-attach aria-label="Attach PDF">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                <span class="plus">+</span>
+              </button>
+              <input type="file" accept="application/pdf,.pdf" multiple hidden>
+              <button type="submit">Send</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="grok-drop" data-grok-drop>Drop PDF for Grok</div>
+      <div class="grok-viewer" data-grok-viewer hidden>
+        <header>
+          <strong data-grok-viewer-name>PDF</strong>
+          <a data-grok-viewer-download href="/files/0">Download</a>
+          <button type="button" data-grok-viewer-close aria-label="Close">×</button>
+        </header>
+        <iframe data-grok-viewer-frame title="PDF"></iframe>
+      </div>
     </section>
   </div>
   <script type="application/json" id="mention-extra">${JSON.stringify([{ id: user.grokId, name: 'Grok' }]).replace(/</g, '\\u003c')}</script>`;

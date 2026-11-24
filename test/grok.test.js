@@ -356,6 +356,8 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     const admin = await login(base, 'arshad@example.com', 'super-password');
     const home = await page(base, admin, '/');
     assert.match(home.text, /data-grok-new/);
+    assert.match(home.text, /data-grok-full/);
+    assert.match(home.text, /data-grok-viewer/);
     const first = await fetch(`${base}/api/grok`, {
       method: 'POST',
       headers: { cookie: admin.header(), 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
@@ -416,6 +418,11 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     const download = await fetch(`${base}/files/${fileId}`, { headers: { cookie: admin.header() } });
     assert.equal(download.status, 200);
     assert.equal(Buffer.from(await download.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+    assert.match(download.headers.get('content-disposition'), /^attachment;/);
+    const inline = await fetch(`${base}/files/${fileId}?inline=1`, { headers: { cookie: admin.header() } });
+    assert.equal(inline.status, 200);
+    assert.match(inline.headers.get('content-disposition'), /^inline; filename="quote\.pdf"/);
+    assert.equal(Buffer.from(await inline.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
 
     const users = await page(base, admin, '/users');
     await post(base, admin, '/users', {
@@ -441,8 +448,22 @@ test('several grok chats and pdf files', { timeout: 60000 }, async () => {
     });
     assert.equal(uploaded.status, 201);
     const shown = await (await fetch(`${base}/api/grok?thread=${alpha.thread_id}`, { headers: { cookie: admin.header(), accept: 'application/json' } })).json();
-    const attached = [...shown.messages, { files: shown.files }].some((message) => (message.files || []).some((file) => file.filename === 'answer.pdf'));
-    assert.equal(attached, true);
+    const linked = shown.messages.find((message) => message.role === 'grok' && (message.files || []).some((file) => file.filename === 'answer.pdf'));
+    assert.equal(Boolean(linked && linked.files.some((file) => file.filename === 'answer.pdf' && file.size > 0)), true);
+    assert.equal((shown.files || []).some((file) => file.filename === 'answer.pdf'), false);
+    const unnamed = await fetch(`${base}/api/bot/chat/${alpha.thread_id}/files`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshadId, filename: '', name: 'drawing.pdf', data: replyPdf, request_id: posted.body.request_id }),
+    });
+    assert.equal(unnamed.status, 201);
+    assert.equal((await unnamed.json()).file.filename, 'drawing.pdf');
+    const blank = await fetch(`${base}/api/bot/chat/${alpha.thread_id}/files`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-bot-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ acting_user_id: arshadId, filename: '   ', data: replyPdf, request_id: posted.body.request_id }),
+    });
+    assert.equal((await blank.json()).file.filename, 'file.pdf');
     const botFile = await fetch(`${base}/api/bot/files/${fileId}`, { headers: { authorization: 'Bearer test-bot-token' } });
     assert.equal(botFile.status, 200);
 

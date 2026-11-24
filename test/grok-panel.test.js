@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acceptGrokFiles, applyGrokClick, grokQueuedLabel, grokShouldQueue, GROK_PDF_MAX_BYTES } from '../public/grok-panel.js';
+import { acceptGrokFiles, applyGrokClick, grokFileView, grokQueuedLabel, grokShouldQueue, toggleGrokLayout, GROK_PDF_MAX_BYTES } from '../public/grok-panel.js';
 
 test('the grok bubble opens once and stays open through that same click', () => {
   let open = false;
@@ -36,6 +36,21 @@ test('a second Grok message waits until the reply is finished', () => {
   assert.equal(grokShouldQueue({ sending: false, pending: false, queued: 1 }), true);
   assert.equal(grokQueuedLabel({ text: 'Check the drawing', files: [{ name: 'sheet.pdf' }] }), 'Check the drawing · sheet.pdf · queued');
   assert.equal(grokQueuedLabel({ text: '', files: [{ name: 'sheet.pdf' }] }), 'sheet.pdf · queued');
+});
+
+test('a file card keeps a name, size, and open link when the filename is blank', () => {
+  const blank = grokFileView({ id: 4, filename: '', size: 2048, expires_label: 'expires in 24h' });
+  assert.equal(blank.name, 'file.pdf');
+  assert.equal(blank.sizeLabel, '2 KB');
+  assert.equal(blank.expiry, 'expires in 24h');
+  assert.equal(blank.openUrl, '/files/4?inline=1');
+  assert.equal(blank.downloadUrl, '/files/4');
+  const named = grokFileView({ id: 9, filename: 'answer.pdf', size: 2 * 1024 * 1024, expired: true });
+  assert.equal(named.name, 'answer.pdf');
+  assert.equal(named.sizeLabel, '2.0 MB');
+  assert.equal(named.expiry, 'expired');
+  assert.equal(toggleGrokLayout('panel'), 'full');
+  assert.equal(toggleGrokLayout('full'), 'panel');
 });
 
 test('the grok bubble, the close button, and a real outside click close the panel', () => {

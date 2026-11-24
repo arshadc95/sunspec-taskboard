@@ -1047,6 +1047,8 @@ td.num.late { color: #dc2626; font-weight: 700; }
   font-family: Inter, sans-serif;
 }
 .grok-panel[hidden] { display: none; }
+.grok-body { display: contents; }
+.grok-stage { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .grok-head {
   display: flex;
   align-items: center;
@@ -1067,10 +1069,14 @@ td.num.late { color: #dc2626; font-weight: 700; }
   background: #fff;
   color: #000;
   border-right: 1px solid #000;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
   transform: translateX(-105%);
 }
+.grok-chats[hidden] { display: none; }
 .grok-chats.is-open { transform: translateX(0); }
+.grok-chats [data-grok-threads] { overflow: auto; flex: 1; }
+.grok-chat-tools { display: none; }
 .grok-chat { display: flex; gap: 4px; align-items: center; padding: 6px; border-bottom: 1px solid #ddd; }
 .grok-chat.is-current { background: #f3f3f3; }
 .grok-chat input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; }
@@ -1088,6 +1094,7 @@ td.num.late { color: #dc2626; font-weight: 700; }
   cursor: pointer;
 }
 .grok-attach svg { width: 18px; height: 18px; }
+.grok-attach .plus { display: none; }
 .grok-drop {
   position: absolute;
   inset: 0;
@@ -1109,7 +1116,99 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .grok-picked span { display: inline-flex; align-items: center; gap: 4px; background: #1a1a1a; color: #fff; padding: 2px 6px; font-size: 12px; }
 .grok-picked button { border: 0; background: transparent; color: #fff; cursor: pointer; font-weight: 700; }
 .grok-pdf-note { margin: 0; padding: 4px 8px 0; color: #555; font-size: 12px; }
-.grok-file a { color: #fff; }
+.grok-file-card {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0;
+  padding: 8px;
+  background: #fff;
+  color: #111;
+  border: 1px solid #000;
+}
+.grok-file-icon {
+  width: 44px;
+  height: 44px;
+  background: #000;
+  color: #f97316;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.grok-file-card strong { display: block; font-size: 14px; }
+.grok-file-card p { margin: 2px 0 0; color: #555; font-size: 12px; }
+.grok-file-card > div:last-child { display: flex; gap: 6px; }
+.grok-file-card button, .grok-file-card a {
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.grok-file-card a { background: #fff; color: #111; }
+.grok-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+}
+.grok-viewer[hidden] { display: none; }
+.grok-viewer header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #000;
+  color: #fff;
+  padding: 8px 12px;
+}
+.grok-viewer header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grok-viewer header a, .grok-viewer header button {
+  color: #fff;
+  background: transparent;
+  border: 1px solid #fff;
+  padding: 4px 8px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+}
+.grok-viewer iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+.grok.is-full .grok-bubble { display: none; }
+.grok.is-full .grok-panel {
+  inset: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  max-height: none;
+  border: 0;
+}
+.grok.is-full .grok-body { display: flex; flex: 1; min-height: 0; }
+.grok.is-full .grok-chats {
+  position: static;
+  transform: none;
+  width: 260px;
+  max-width: none;
+  flex: none;
+  border-right: 1px solid #000;
+}
+.grok.is-full [data-grok-chats] { display: none; }
+.grok.is-full .grok-chat-tools { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid #000; }
+.grok.is-full .grok-chat-search { flex: 1; min-width: 0; border: 1px solid #000; padding: 6px 8px; font: inherit; }
+.grok.is-full .grok-chat-tools button { border: 1px solid #000; background: #000; color: #fff; padding: 6px 8px; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.grok.is-full .grok-stage { background: #eee; }
+.grok.is-full .grok-log, .grok.is-full .grok-form { width: min(760px, 100%); margin: 0 auto; background: #fff; }
+.grok.is-full .grok-mine, .grok.is-full .grok-theirs, .grok.is-full .grok-note, .grok.is-full .grok-wait { border-radius: 0; }
+.grok.is-full .grok-attach svg { display: none; }
+.grok.is-full .grok-attach .plus { display: inline; font-size: 22px; line-height: 1; }
 .grok-log { flex: 1; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 .grok-mine, .grok-theirs, .grok-note, .grok-wait {
   margin: 0;
