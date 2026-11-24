@@ -445,12 +445,14 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
       </div>
       <div class="std" data-standard>
-        <span class="std-kicker">Standard</span>
-        <button type="button" class="std-nav" data-std-prev aria-label="Previous standard">‹</button>
-        <span class="std-tag" data-std-tag>${esc(first.category)}</span>
-        <span class="std-line" data-std-line><strong data-std-code>${esc(first.code)}</strong> <span data-std-summary>${esc(first.summary)}</span></span>
-        <button type="button" class="std-more" data-std-more aria-expanded="false">Why</button>
-        <button type="button" class="std-nav" data-std-next aria-label="Next standard">›</button>
+        <div class="std-row">
+          <span class="std-tag" data-std-tag>${esc(first.category)}</span>
+          <strong class="std-code" data-std-code>${esc(first.code)}</strong>
+          <span class="std-line" data-std-summary>${esc(first.summary)}</span>
+          <button type="button" class="std-more" data-std-more aria-expanded="false">Why</button>
+          <button type="button" class="std-nav" data-std-prev aria-label="Previous standard">‹</button>
+          <button type="button" class="std-nav" data-std-next aria-label="Next standard">›</button>
+        </div>
         <p class="std-detail" data-std-tip hidden>${esc(first.tip)}</p>
       </div>
     </div>

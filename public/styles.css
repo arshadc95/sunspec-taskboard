@@ -326,13 +326,22 @@ tr.task-row:hover td { background: #fff7ed; }
 .std {
   margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 320px;
+  max-width: 100%;
+}
+.std-row {
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex: 1 1 280px;
-  justify-content: flex-end;
+  min-height: 28px;
 }
+.std-code { flex: 0 0 auto; font-size: 13px; white-space: nowrap; }
 .std-nav, .std-more {
   height: 28px;
   border: 1px solid #111;
@@ -353,8 +362,8 @@ tr.task-row:hover td { background: #fff7ed; }
   padding: 3px 6px;
   flex: 0 0 auto;
 }
-.std-line { min-width: 0; flex: 1 1 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.std-detail { flex: 1 0 100%; margin: 0; padding: 2px 0 4px; color: #333; }
+.std-line { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333; font-size: 13px; }
+.std-detail { margin: 0; padding: 0 0 2px; color: #333; font-size: 13px; line-height: 1.35; }
 .std-detail[hidden] { display: none; }
 .board-bar {
   display: flex;
