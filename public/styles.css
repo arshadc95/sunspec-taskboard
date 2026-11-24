@@ -45,7 +45,7 @@ a { color: inherit; }
   align-items: center;
   justify-content: center;
 }
-.brand img { height: 40px; width: 44px; object-fit: contain; display: block; }
+.brand img { height: 40px; width: 44px; object-fit: contain; display: block; transform: scale(1.35); transform-origin: left center; }
 .top-spacer { flex: 1; }
 .who { display: flex; align-items: center; gap: 8px; }
 .who-name { font-size: 12px; font-weight: 600; color: #fff; }
@@ -91,7 +91,7 @@ a { color: inherit; }
 .nav-label { display: none; font-size: 13px; font-weight: 600; }
 .nav-link svg { width: 18px; height: 18px; }
 .nav-link:hover { background: rgba(0, 0, 0, 0.12); }
-.nav-link.active { background: rgba(0, 0, 0, 0.18); box-shadow: inset 3px 0 0 #fff; }
+.nav-link.active { background: #111; color: #fff; box-shadow: none; }
 .nav-badge {
   position: absolute;
   top: 2px;
@@ -146,15 +146,16 @@ a { color: inherit; }
   align-items: center;
   height: 26px;
   padding: 0 10px;
-  background: #111;
+  background: #fff;
   color: #f97316;
   border: 0;
+  border-radius: 0;
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
 }
-.subbar-new:hover { background: #000; color: #fff; }
+.subbar-new:hover { background: #e6e6e6; color: #f97316; }
 
 .content { padding: 12px; }
 .tz { color: var(--muted); font-size: 11px; margin: 14px 0 0; }
@@ -389,7 +390,7 @@ table.users td { min-width: 90px; }
 @media (max-width: 800px) {
   .hamburger { display: inline-flex; }
   .who-name { display: none; }
-  .brand img { height: 46px; }
+  .brand img { height: 40px; width: 44px; }
   .brand { width: auto; flex: 0 1 auto; padding-left: 4px; }
   .sidebar {
     position: fixed;

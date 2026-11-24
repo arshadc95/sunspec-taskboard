@@ -184,8 +184,8 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
   <aside class="sidebar">
     <nav class="nav">
       ${navLink('/', 'tasks', 'Tasks', active)}
-      ${navLink('/?mentions=1', 'at', 'Mentions', active, unread)}
       ${navLink('/calendar', 'calendar', 'Calendar', active)}
+      ${navLink('/?mentions=1', 'at', 'Mentions', active, unread)}
       ${navLink('/team', 'team', 'Team', active)}
       ${staff ? navLink('/manage', 'chart', 'Manage', active) : ''}
       ${staff ? navLink('/users', 'users', 'Users', active) : ''}
@@ -210,8 +210,8 @@ function layout({ title, user, active, crumb, actions = '', body, csrf, msg, peo
 </div>
 <nav class="bottom-nav">
   <a class="${active === 'tasks' ? 'active' : ''}" href="/">Tasks</a>
-  <a class="${active === 'at' ? 'active' : ''}" href="/?mentions=1">Mentions${unread ? ` (${unread > 9 ? '9+' : unread})` : ''}</a>
   <a class="${active === 'calendar' ? 'active' : ''}" href="/calendar">Calendar</a>
+  <a class="${active === 'at' ? 'active' : ''}" href="/?mentions=1">Mentions${unread ? ` (${unread > 9 ? '9+' : unread})` : ''}</a>
   <a class="${active === 'team' ? 'active' : ''}" href="/team">Team</a>
   ${staff ? `<a class="${active === 'chart' ? 'active' : ''}" href="/manage">Manage</a>` : ''}
   ${staff ? `<a class="${active === 'users' ? 'active' : ''}" href="/users">Users</a>` : ''}
