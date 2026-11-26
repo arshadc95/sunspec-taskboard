@@ -24,7 +24,8 @@ test('an empty team card does not show a table of zeros', () => {
   assert.match(html, /Ada Lovelace/);
   assert.match(html, /class="swatch c-/);
   assert.match(html, /No open tasks/);
-  assert.match(html, /No hours this month/);
+  assert.match(html, /Logged this month/);
+  assert.match(html, />0m</);
   assert.match(html, /On time —/);
   assert.match(html, /No streak/);
   assert.doesNotMatch(html, /None yet/);
@@ -125,4 +126,34 @@ test('a card with many tasks shows three rows and a link for the rest', () => {
   assert.match(html, /Job 02/);
   assert.doesNotMatch(html, /Job 03/);
   assert.match(html, new RegExp(`href="/\\?assignee=${ada.id}">\\+17 more`));
+});
+
+test('a team card shows logged time, a live timer, and an auto-stop flag', () => {
+  const html = page([{
+    id: 4,
+    name: 'Sam Cole',
+    role: 'user',
+    color: '#1d4ed8',
+    open: 1,
+    overdue: 0,
+    monthCount: 0,
+    monthSeconds: 5400,
+    todaySeconds: 1800,
+    onTimePercent: null,
+    streak: 0,
+    upcoming: [],
+    more: 0,
+    load: 10,
+    running: { taskId: 9, title: 'String the array', startedAt: '2026-11-26T08:00:00.000Z' },
+    flag: { taskId: 9, auto: true },
+  }]);
+  assert.match(html, /Logged this month/);
+  assert.match(html, />1h 30m</);
+  assert.match(html, /Today/);
+  assert.match(html, />30m</);
+  assert.match(html, /class="timer-badge"/);
+  assert.match(html, /String the array/);
+  assert.match(html, /class="time-flag"[^>]*>Auto-stopped/);
+  assert.match(html, /href="\/tasks\/9"/);
+  assert.doesNotMatch(html, / style=/);
 });

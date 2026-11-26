@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { COLOR_NAMES, PALETTE, colorClass, colorForUser } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
+import { dateInJohannesburg, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
 
 const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
@@ -637,6 +637,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         <a href="/?mine=1">${mineDay.open} open</a>
         <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
         ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
+        ${mineDay.review ? `<a class="day-flag" href="/tasks/${mineDay.review.task_id}">Auto-stopped · ${esc(mineDay.review.title)}</a>` : ''}
       </div>
       <div class="std" data-standard>
         <div class="std-row">
@@ -686,26 +687,57 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   });
 }
 
-function renderTimer(task, csrf, timer) {
-  if (!task?.id || !timer) return '';
+function renderTimer(task, csrf, timer, user, users, today) {
+  if (!task?.id || !timer || !user) return '';
   const mine = timer.mine;
   const summary = timer.summary || { total: 0, perUser: [] };
   const entries = timer.entries || [];
+  const waiting = entries.some((entry) => entry.auto_stopped && entry.user_id === user.id);
   const controls = !timer.canControl
-    ? '<p class="hint">Only the assignee can start or stop the timer.</p>'
+    ? ''
     : mine
     ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
       <form method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-danger" type="submit">Stop</button></form>`
     : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
       ${timer.other ? `<p class="hint">Starting stops your timer on <a href="/tasks/${timer.other.task_id}">${esc(timer.other.task_title)}</a>.</p>` : ''}`;
-  return `<section class="panel pad">
+  const people = (users || []).filter((person) => person.active !== 0 && !person.is_bot);
+  const logFor = user.role === 'superuser'
+    ? `<label class="field"><span>Person</span><select name="user_id">${people.map((person) => `<option value="${person.id}"${person.id === user.id ? ' selected' : ''}>${esc(person.name)}</option>`).join('')}</select></label>`
+    : '';
+  const rows = entries.map((entry) => {
+    const canAmend = user.role === 'superuser' || entry.user_id === user.id;
+    const when = dateInJohannesburg(entry.started_at) || today;
+    return `<li>
+      <p>${nameLine(entry.user_name, entry.color, entry.user_id)} · ${esc(formatDateTime(entry.started_at))} · <strong>${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}</strong>${entry.auto_stopped ? ' <span class="auto-badge">Auto-stopped</span>' : ''}${entry.note ? ` · ${esc(entry.note)}` : ''}</p>
+      ${canAmend ? `<form class="time-edit" method="post" action="/tasks/${task.id}/time/${entry.id}">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        <input name="duration" required value="${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}" aria-label="Duration" placeholder="1h 30m">
+        <input type="date" name="date" required value="${esc(when)}" aria-label="Date">
+        <input name="note" maxlength="120" value="${esc(entry.note || '')}" placeholder="Note" aria-label="Note">
+        <button class="btn btn-tiny" type="submit">Save</button>
+      </form>
+      <form method="post" action="/tasks/${task.id}/time/${entry.id}/delete" data-confirm="Delete this time entry?">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        <button class="btn btn-tiny" type="submit">Delete</button>
+      </form>` : ''}
+    </li>`;
+  }).join('');
+  return `<section class="panel pad task-time">
     <h2>Time</h2>
+    ${waiting ? `<p class="day-flag">This timer was stopped automatically. Adjust it below.</p>` : ''}
     ${controls}
-    <p>Total ${esc(formatDuration(summary.total))}</p>
-    ${summary.perUser.length ? `<table class="grid compact"><thead><tr><th>Person</th><th>Time</th></tr></thead><tbody>
-      ${summary.perUser.map((person) => `<tr><td>${nameLine(person.user_name, person.color, person.user_id)}</td><td>${esc(formatDuration(person.seconds))}</td></tr>`).join('')}
-    </tbody></table>` : '<p class="hint">No time logged yet.</p>'}
-    ${entries.length ? `<h2>Entries</h2><ul class="plain">${entries.map((entry) => `<li>${nameLine(entry.user_name, entry.color, entry.user_id)} · ${esc(formatDateTime(entry.started_at))} – ${entry.ended_at ? esc(formatDateTime(entry.ended_at)) : 'running'} · ${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}</li>`).join('')}</ul>` : ''}
+    <p class="time-total">Total <strong>${esc(formatDuration(summary.total))}</strong></p>
+    ${rows ? `<ul class="time-log">${rows}</ul>` : '<p class="hint">No time logged yet.</p>'}
+    <form class="time-add" method="post" action="/tasks/${task.id}/time">
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      ${logFor}
+      <label class="field"><span>Duration</span><input name="duration" placeholder="1h 30m" aria-label="Duration"></label>
+      <label class="field"><span>Hours</span><input name="hours" inputmode="decimal" placeholder="0" aria-label="Hours"></label>
+      <label class="field"><span>Minutes</span><input name="minutes" inputmode="numeric" placeholder="0" aria-label="Minutes"></label>
+      <label class="field"><span>Date</span><input type="date" name="date" required value="${esc(today || '')}" aria-label="Date"></label>
+      <label class="field"><span>Note</span><input name="note" maxlength="120" placeholder="Optional" aria-label="Note"></label>
+      <button class="btn" type="submit">Log time</button>
+    </form>
   </section>`;
 }
 
@@ -780,8 +812,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
       <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
       <div class="task-layout">
       ${taskForm({ task, users, projects, csrf, canEdit: editable, currentUser: user, today, split: true, metaHtml: meta })}
+      ${renderTimer(task, csrf, timer, user, users, today)}
       <div class="task-rest">
-      ${renderTimer(task, csrf, timer)}
       ${isNew ? '' : `<section class="panel pad">
         <h2>Files</h2>
         ${attachments.length ? `<ul class="files">${attachments.map((file) => {
@@ -1107,11 +1139,6 @@ export function renderCalendar({ user, csrf, msg, tasks, filters, users, project
   });
 }
 
-function hoursLabel(value) {
-  if (!value) return 'No hours';
-  return `${value}h`;
-}
-
 function onTimeLabel(value) {
   if (value == null) return '—';
   return `${value}%`;
@@ -1145,7 +1172,14 @@ function teamCard(row) {
       <strong${row.overdue ? ' class="hot"' : ''}>${row.overdue}</strong>
       <strong>${row.monthCount}</strong>
     </div>
-    <p class="person-small"><span>${hoursLabel(row.monthHours)} this month</span><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
+    <div class="person-logged">
+      <span>Logged this month</span>
+      <strong>${esc(formatDuration(row.monthSeconds || 0))}</strong>
+      ${row.todaySeconds ? `<span>Today</span><strong>${esc(formatDuration(row.todaySeconds))}</strong>` : ''}
+    </div>
+    ${row.running ? `<a class="timer-badge" href="/tasks/${row.running.taskId}" data-started="${esc(row.running.startedAt)}"><strong class="timer-elapsed">${esc(formatDuration(entrySeconds(row.running.startedAt, null)))}</strong><span>${esc(row.running.title)}</span></a>` : ''}
+    ${row.flag ? `<a class="time-flag" href="/tasks/${row.flag.taskId}">${row.flag.auto ? 'Auto-stopped' : 'Over 8h'}</a>` : ''}
+    <p class="person-small"><span>On time ${onTimeLabel(row.onTimePercent)}</span><span>${streakLabel(row.streak)}</span></p>
     <div class="load-track" title="${row.open} open"><span class="w-${Math.max(0, Math.min(100, Math.round(row.load || 0)))}"></span></div>
     ${teamTasks(row)}
   </article>`;

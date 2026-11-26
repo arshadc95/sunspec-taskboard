@@ -3,7 +3,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { colorForUser, colorsToStore, nextColor, normalizeColor } from './colors.js';
 import { hashPassword } from './passwords.js';
-import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, todayDate } from './time.js';
+import { grokMessage, notifyUser } from './events.js';
+import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, timerStopAt, todayDate } from './time.js';
 
 export function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -125,7 +126,10 @@ function migrate(db) {
       task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       user_id INTEGER NOT NULL REFERENCES users(id),
       started_at TEXT NOT NULL,
-      ended_at TEXT
+      ended_at TEXT,
+      auto_stopped INTEGER NOT NULL DEFAULT 0,
+      note TEXT,
+      updated_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_time_task ON time_entries(task_id);
@@ -233,6 +237,16 @@ function migrate(db) {
   const colorColumns = db.prepare('PRAGMA table_info(users)').all();
   if (!colorColumns.some((column) => column.name === 'color')) {
     db.exec('ALTER TABLE users ADD COLUMN color TEXT');
+  }
+  const timeColumns = db.prepare('PRAGMA table_info(time_entries)').all();
+  if (timeColumns.length && !timeColumns.some((column) => column.name === 'auto_stopped')) {
+    db.exec('ALTER TABLE time_entries ADD COLUMN auto_stopped INTEGER NOT NULL DEFAULT 0');
+  }
+  if (timeColumns.length && !timeColumns.some((column) => column.name === 'note')) {
+    db.exec('ALTER TABLE time_entries ADD COLUMN note TEXT');
+  }
+  if (timeColumns.length && !timeColumns.some((column) => column.name === 'updated_at')) {
+    db.exec('ALTER TABLE time_entries ADD COLUMN updated_at TEXT');
   }
   relaxGrokThreads(db);
   backfillTaskAssignees(db);
@@ -931,7 +945,30 @@ export function managementReport(db, filters) {
   };
 }
 
+export function capRunningTimers(db, now = new Date()) {
+  const running = db.prepare('SELECT * FROM time_entries WHERE ended_at IS NULL').all();
+  const stopped = [];
+  const stamp = now.toISOString();
+  for (const row of running) {
+    const stopAt = timerStopAt(row.started_at);
+    if (!stopAt || Date.parse(stopAt) > now.getTime()) continue;
+    const changed = db.prepare(`
+      UPDATE time_entries SET ended_at = ?, auto_stopped = 1, updated_at = ? WHERE id = ? AND ended_at IS NULL
+    `).run(stopAt, stamp, row.id);
+    if (!changed.changes) continue;
+    stopped.push(row);
+    notifyUser(row.user_id, {
+      kind: 'timer',
+      text: 'A timer was stopped automatically',
+      href: `/tasks/${row.task_id}`,
+      count: unreadMentionCount(db, row.user_id),
+    });
+  }
+  return stopped;
+}
+
 export function listRunningTimers(db) {
+  capRunningTimers(db);
   return db.prepare(`
     SELECT te.*, u.name AS user_name, u.color AS color, t.title AS task_title
     FROM time_entries te
@@ -946,6 +983,7 @@ export function listRunningTimers(db) {
 }
 
 export function getRunningTimer(db, userId) {
+  capRunningTimers(db);
   return db.prepare(`
     SELECT te.*, t.title AS task_title
     FROM time_entries te
@@ -963,13 +1001,13 @@ export function startTimer(db, { userId, taskId }) {
     if (running && running.task_id === taskId) return { already: true, entry: running, stopped: null };
     let stopped = null;
     if (running) {
-      db.prepare('UPDATE time_entries SET ended_at = ? WHERE id = ?').run(now, running.id);
+      db.prepare('UPDATE time_entries SET ended_at = ?, updated_at = ? WHERE id = ?').run(now, now, running.id);
       stopped = { ...running, ended_at: now };
     }
     const info = db.prepare(`
-      INSERT INTO time_entries (task_id, user_id, started_at, ended_at)
-      VALUES (?, ?, ?, NULL)
-    `).run(taskId, userId, now);
+      INSERT INTO time_entries (task_id, user_id, started_at, ended_at, auto_stopped, updated_at)
+      VALUES (?, ?, ?, NULL, 0, ?)
+    `).run(taskId, userId, now, now);
     return { already: false, stopped, id: Number(info.lastInsertRowid), startedAt: now };
   })();
 }
@@ -980,11 +1018,46 @@ export function stopTimer(db, { userId, taskId }) {
   `).get(userId, taskId);
   if (!running) return null;
   const now = new Date().toISOString();
-  db.prepare('UPDATE time_entries SET ended_at = ? WHERE id = ?').run(now, running.id);
+  db.prepare('UPDATE time_entries SET ended_at = ?, updated_at = ? WHERE id = ?').run(now, now, running.id);
   return { ...running, ended_at: now };
 }
 
+export function getTimeEntry(db, id) {
+  return db.prepare(`
+    SELECT te.*, u.name AS user_name, u.color AS color, t.title AS task_title
+    FROM time_entries te
+    JOIN users u ON u.id = te.user_id
+    JOIN tasks t ON t.id = te.task_id
+    WHERE te.id = ?
+  `).get(id) || null;
+}
+
+export function addManualEntry(db, { taskId, userId, startedAt, seconds, note }) {
+  const ended = new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
+  const now = new Date().toISOString();
+  const info = db.prepare(`
+    INSERT INTO time_entries (task_id, user_id, started_at, ended_at, auto_stopped, note, updated_at)
+    VALUES (?, ?, ?, ?, 0, ?, ?)
+  `).run(taskId, userId, startedAt, ended, note || null, now);
+  return Number(info.lastInsertRowid);
+}
+
+export function updateTimeEntry(db, id, { startedAt, seconds, note }) {
+  const ended = new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE time_entries
+    SET started_at = ?, ended_at = ?, note = ?, auto_stopped = 0, updated_at = ?
+    WHERE id = ?
+  `).run(startedAt, ended, note || null, now, id);
+}
+
+export function deleteTimeEntry(db, id) {
+  db.prepare('DELETE FROM time_entries WHERE id = ?').run(id);
+}
+
 export function listTimeEntries(db, taskId) {
+  capRunningTimers(db);
   return db.prepare(`
     SELECT te.*, u.name AS user_name, u.color AS color
     FROM time_entries te
@@ -998,6 +1071,7 @@ export function listTimeEntries(db, taskId) {
 }
 
 export function timeTotals(db, now = Date.now()) {
+  capRunningTimers(db, new Date(now));
   const totals = new Map();
   for (const row of db.prepare('SELECT task_id, started_at, ended_at FROM time_entries').all()) {
     totals.set(row.task_id, (totals.get(row.task_id) || 0) + entrySeconds(row.started_at, row.ended_at, now));
@@ -1092,11 +1166,11 @@ export function mentionReviewer(db, { taskId, authorId, reviewer, note }) {
   const body = text ? `@[${reviewer.name}](${reviewer.id}) ${text}` : `@[${reviewer.name}](${reviewer.id})`;
   const commentId = addComment(db, { taskId, authorId, body });
   setCommentMentions(db, commentId, [reviewer.id]);
-  notifyMentions(db, { taskId, userIds: [reviewer.id], actorId: authorId });
+  notifyMentions(db, { taskId, userIds: [reviewer.id], actorId: authorId, text: 'Review requested' });
   return commentId;
 }
 
-export function notifyMentions(db, { taskId, userIds, actorId }) {
+export function notifyMentions(db, { taskId, userIds, actorId, text }) {
   const now = new Date().toISOString();
   const existing = db.prepare('SELECT id FROM mention_notices WHERE user_id = ? AND task_id = ? AND read_at IS NULL');
   const insert = db.prepare('INSERT INTO mention_notices (user_id, task_id, created_at) VALUES (?, ?, ?)');
@@ -1104,6 +1178,12 @@ export function notifyMentions(db, { taskId, userIds, actorId }) {
     if (!userId || userId === actorId) continue;
     if (existing.get(userId, taskId)) continue;
     insert.run(userId, taskId, now);
+    notifyUser(userId, {
+      kind: 'mention',
+      text: text || 'You were mentioned',
+      href: `/tasks/${taskId}`,
+      count: unreadMentionCount(db, userId),
+    });
   }
 }
 
@@ -1158,6 +1238,7 @@ export function toggleKudo(db, { userId, targetType, targetId }) {
 }
 
 export function myDay(db, userId, today) {
+  capRunningTimers(db);
   const open = db.prepare(`
     SELECT COUNT(*) AS n FROM tasks t
     WHERE t.status != 'done' AND t.deleted_at IS NULL
@@ -1174,7 +1255,15 @@ export function myDay(db, userId, today) {
     JOIN tasks t ON t.id = te.task_id
     WHERE te.user_id = ? AND te.ended_at IS NULL AND t.deleted_at IS NULL
   `).get(userId) || null;
-  return { open, dueToday, timer };
+  const review = db.prepare(`
+    SELECT te.task_id, t.title
+    FROM time_entries te
+    JOIN tasks t ON t.id = te.task_id
+    WHERE te.user_id = ? AND te.auto_stopped = 1 AND t.deleted_at IS NULL
+    ORDER BY te.id DESC
+    LIMIT 1
+  `).get(userId) || null;
+  return { open, dueToday, timer, review };
 }
 
 function hoursFrom(entries, sinceIso, now) {
@@ -1188,6 +1277,7 @@ function hoursFrom(entries, sinceIso, now) {
 }
 
 export function teamBoard(db, now = Date.now()) {
+  capRunningTimers(db, new Date(now));
   const moment = new Date(now);
   const today = todayDate(moment);
   const weekIso = startOfWeekIso(moment);
@@ -1201,7 +1291,7 @@ export function teamBoard(db, now = Date.now()) {
     members.get(link.task_id).push(link.user_id);
   }
   const entries = db.prepare(`
-    SELECT te.user_id, te.started_at, te.ended_at
+    SELECT te.user_id, te.task_id, te.started_at, te.ended_at, te.auto_stopped, t.title
     FROM time_entries te
     JOIN tasks t ON t.id = te.task_id
     WHERE t.deleted_at IS NULL
@@ -1236,6 +1326,16 @@ export function teamBoard(db, now = Date.now()) {
       }
     }
     const userEntries = entries.filter((entry) => entry.user_id === person.id);
+    const monthStart = Date.parse(monthIso);
+    const todayStart = Date.parse(`${today}T00:00:00+02:00`);
+    const monthEntries = userEntries.filter((entry) => Date.parse(entry.started_at) >= monthStart);
+    const todaySeconds = monthEntries.reduce((sum, entry) => (
+      Date.parse(entry.started_at) >= todayStart ? sum + entrySeconds(entry.started_at, entry.ended_at, now) : sum
+    ), 0);
+    const runningEntry = userEntries.find((entry) => !entry.ended_at) || null;
+    const flagged = monthEntries.find((entry) => entry.auto_stopped)
+      || monthEntries.find((entry) => entrySeconds(entry.started_at, entry.ended_at, now) > 8 * 3600)
+      || null;
     const mineOpen = openTasks.filter((task) => (members.get(task.id) || []).includes(person.id));
     const upcoming = mineOpen
       .filter((task) => task.due_date)
@@ -1262,6 +1362,10 @@ export function teamBoard(db, now = Date.now()) {
       monthCount,
       weekHours: hoursFrom(userEntries, weekIso, now),
       monthHours: hoursFrom(userEntries, monthIso, now),
+      monthSeconds: monthEntries.reduce((sum, entry) => sum + entrySeconds(entry.started_at, entry.ended_at, now), 0),
+      todaySeconds,
+      running: runningEntry ? { taskId: runningEntry.task_id, title: runningEntry.title, startedAt: runningEntry.started_at } : null,
+      flag: flagged ? { taskId: flagged.task_id, auto: Boolean(flagged.auto_stopped) } : null,
       onTimePercent: withDue ? Math.round((onTime / withDue) * 100) : null,
       streak,
       upcoming,
@@ -1385,6 +1489,8 @@ export function completeGrokReply(db, threadId, { requestId, text }) {
   db.prepare("UPDATE grok_files SET message_id = ? WHERE thread_id = ? AND kind = 'out' AND message_id IS NULL").run(messageId, threadId);
   if (requestId) db.prepare('DELETE FROM grok_live WHERE request_id = ?').run(requestId);
   db.prepare('UPDATE grok_threads SET updated_at = ? WHERE id = ?').run(now, threadId);
+  const thread = getGrokThread(db, threadId);
+  if (thread) grokMessage(thread.user_id, threadId);
   return messageId;
 }
 

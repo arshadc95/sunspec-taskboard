@@ -1,3 +1,4 @@
+import { backdropCloses } from './dialog-close.js';
 import { acceptGrokFiles, applyGrokClick, grokFileView, grokMessageBlocks, grokQueuedLabel, grokShouldQueue, grokThreadVisible } from './grok-panel.js';
 import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
@@ -26,6 +27,10 @@ function readJson(id) {
   try { return JSON.parse(node.textContent || '[]'); } catch { return []; }
 }
 
+let openDrawer = () => {};
+let pageKeys = false;
+let unloadWatch = null;
+function bindPage() {
 const standardRoot = document.querySelector('[data-standard]');
 const standardList = readJson('standards-data');
 if (standardRoot && standardList.length) {
@@ -126,14 +131,14 @@ document.querySelectorAll('[data-done-toggle]').forEach((button) => {
 });
 
 const drawer = document.getElementById('task-drawer');
-function openDrawer() {
+openDrawer = () => {
   if (!drawer?.showModal) {
     window.location.href = '/tasks/new';
     return;
   }
   if (!drawer.open) drawer.showModal();
   drawer.querySelector('input[name="title"]')?.focus();
-}
+};
 document.querySelectorAll('[data-open-drawer]').forEach((link) => {
   link.addEventListener('click', (event) => {
     if (!drawer) return;
@@ -149,9 +154,7 @@ drawer?.addEventListener('cancel', (event) => {
   event.preventDefault();
   drawer.close();
 });
-drawer?.addEventListener('click', (event) => {
-  if (event.target === drawer) drawer.close();
-});
+wireBackdrop(drawer, () => drawer.close());
 drawer?.querySelector('.task-form')?.addEventListener('submit', () => drawer.close());
 
 const reviewDialog = document.getElementById('review-dialog');
@@ -162,6 +165,7 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
   const menu = document.createElement('div');
   menu.className = 'combo-menu';
   menu.hidden = true;
+  armCombo(menu);
   watchMenu(menu, reviewerSearch);
   let menuIndex = 0;
   let chosenName = '';
@@ -176,6 +180,7 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
       if (itemIndex === menuIndex) choice.classList.add('active');
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();
+        event.stopPropagation();
         reviewerId.value = String(item.id);
         chosenName = item.name;
         reviewerSearch.value = item.name;
@@ -224,9 +229,7 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
     event.preventDefault();
     closeReview();
   });
-  reviewDialog.addEventListener('click', (event) => {
-    if (event.target === reviewDialog) closeReview();
-  });
+  wireBackdrop(reviewDialog, closeReview);
   reviewForm.addEventListener('submit', (event) => {
     if (!reviewerId.value) {
       event.preventDefault();
@@ -252,11 +255,13 @@ function taskEditDirty() {
   form.addEventListener('change', refresh);
   form.addEventListener('click', refresh);
   form.addEventListener('submit', () => { dirty = false; });
-  window.addEventListener('beforeunload', (event) => {
+  if (unloadWatch) window.removeEventListener('beforeunload', unloadWatch);
+  unloadWatch = (event) => {
     if (!dirty) return;
     event.preventDefault();
     event.returnValue = '';
-  });
+  };
+  window.addEventListener('beforeunload', unloadWatch);
   refresh();
 }
 taskEditDirty();
@@ -270,7 +275,9 @@ document.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
     }
   });
 });
-document.addEventListener('keydown', (event) => {
+if (!pageKeys) {
+  pageKeys = true;
+  document.addEventListener('keydown', (event) => {
   const typing = event.target.closest('input, textarea, select');
   if (event.key === 'n' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault();
@@ -281,7 +288,8 @@ document.addEventListener('keydown', (event) => {
     if (form?.id === 'task-edit' && document.querySelector('[data-task-save]')?.disabled) return;
     if (form) form.requestSubmit();
   }
-});
+  });
+}
 
 document.querySelectorAll('[data-priority], [data-status]').forEach((button) => {
   button.addEventListener('click', () => {
@@ -361,6 +369,10 @@ function hideOtherMenus(menu) {
     if (other !== menu) other.hidden = true;
   });
 }
+function armCombo(menu) {
+  menu.addEventListener('mousedown', (event) => event.stopPropagation());
+  menu.addEventListener('click', (event) => event.stopPropagation());
+}
 function placeCombo(menu, input) {
   const box = input.getBoundingClientRect();
   const host = input.closest('dialog') || document.body;
@@ -389,6 +401,7 @@ document.querySelectorAll('[data-assignee-search]').forEach((input) => {
   const menu = document.createElement('div');
   menu.className = 'combo-menu';
   menu.hidden = true;
+  armCombo(menu);
   watchMenu(menu, input);
   let index = 0;
   const render = () => {
@@ -403,6 +416,7 @@ document.querySelectorAll('[data-assignee-search]').forEach((input) => {
       if (itemIndex === index) choice.classList.add('active');
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();
+        event.stopPropagation();
         addAssignee(field, item.id, item.name, item.swatch);
         input.value = '';
         menu.hidden = true;
@@ -434,6 +448,7 @@ function attachCombo(input, hidden, items) {
   const menu = document.createElement('div');
   menu.className = 'combo-menu';
   menu.hidden = true;
+  armCombo(menu);
   watchMenu(menu, input);
   let index = 0;
   const render = () => {
@@ -447,6 +462,7 @@ function attachCombo(input, hidden, items) {
       if (itemIndex === index) choice.classList.add('active');
       choice.addEventListener('mousedown', (event) => {
         event.preventDefault();
+        event.stopPropagation();
         input.value = item.name;
         hidden.value = item.id;
         hidden.dispatchEvent(new Event('input', { bubbles: true }));
@@ -481,6 +497,18 @@ document.querySelectorAll('[data-project-input]').forEach((input) => {
 document.querySelectorAll('[data-user-input]').forEach((input) => {
   attachCombo(input, input.parentElement.querySelector('[data-user-id]'), readJson('people-data'));
 });
+}
+bindPage();
+
+function wireBackdrop(dialog, close) {
+  if (!dialog) return;
+  let down = null;
+  dialog.addEventListener('mousedown', (event) => { down = event.target; });
+  dialog.addEventListener('click', (event) => {
+    if (backdropCloses(down, event.target, dialog)) close();
+    down = null;
+  });
+}
 
 const mentionMenu = document.createElement('div');
 mentionMenu.className = 'mention-menu';
@@ -909,8 +937,8 @@ if (grokRoot) {
   function watch() {
     window.clearInterval(timer);
     timer = 0;
-    if (!waitingCount) return;
-    timer = window.setInterval(() => { load().catch(() => {}); }, 3000);
+    if (!waitingCount || sseLive) return;
+    timer = window.setInterval(() => { load().catch(() => {}); }, 15000);
   }
 
   function drawerMode() {
@@ -1163,9 +1191,106 @@ if (grokRoot) {
     localStorage.setItem('grok-sound', on ? '1' : '0');
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) seeThread(threadId); });
+  document.addEventListener('sse-state', (event) => {
+    sseLive = Boolean(event.detail?.ok);
+    watch();
+  });
+  document.addEventListener('grok-refresh', () => { load().catch(() => {}); });
   if (full) setOpen(true);
   else load().then(watch).catch(() => {});
 }
+
+let sseLive = false;
+let sse;
+let sseTimer = 0;
+
+function setMentionCount(count) {
+  const n = Number(count) || 0;
+  document.querySelectorAll('a.nav-link[href="/?mentions=1"]').forEach((link) => {
+    let badge = link.querySelector('.nav-badge');
+    if (!n) {
+      badge?.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-badge';
+      link.querySelector('svg')?.after(badge);
+    }
+    badge.textContent = n > 9 ? '9+' : String(n);
+  });
+  const mobile = document.querySelector('.bottom-nav a[href="/?mentions=1"]');
+  if (mobile) mobile.textContent = n ? `Mentions (${n > 9 ? '9+' : n})` : 'Mentions';
+}
+
+function showPing(text, href) {
+  document.querySelector('.ping')?.remove();
+  const box = document.createElement('div');
+  box.className = 'ping';
+  box.setAttribute('role', 'status');
+  const link = document.createElement('a');
+  link.href = href || '/';
+  link.textContent = text || 'Update';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Dismiss');
+  close.textContent = '×';
+  close.addEventListener('click', () => box.remove());
+  box.append(link, close);
+  document.body.append(box);
+  window.setTimeout(() => box.remove(), 8000);
+}
+
+async function refreshContent() {
+  const path = location.pathname;
+  const live = path === '/' || path === '/team' || path === '/calendar' || path === '/manage' || /^\/tasks\/\d+$/.test(path);
+  if (!live) return;
+  if (document.querySelector('dialog[open]')) return;
+  const active = document.activeElement;
+  if (active && active.matches?.('input, textarea, select') && active.closest('.content')) return;
+  const response = await fetch(location.href, { headers: { accept: 'text/html' } });
+  if (!response.ok) return;
+  const html = await response.text();
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  const next = parsed.querySelector('.content');
+  const current = document.querySelector('.content');
+  if (!next || !current) return;
+  current.replaceWith(document.importNode(next, true));
+  bindPage();
+}
+
+function connectSse() {
+  if (!document.body.classList.contains('app')) return;
+  if (sse) sse.close();
+  sse = new EventSource('/events');
+  sse.onopen = () => {
+    sseLive = true;
+    document.dispatchEvent(new CustomEvent('sse-state', { detail: { ok: true } }));
+  };
+  sse.addEventListener('grok:message', () => {
+    document.dispatchEvent(new CustomEvent('grok-refresh'));
+  });
+  sse.addEventListener('board:changed', (event) => {
+    let data = {};
+    try { data = JSON.parse(event.data || '{}'); } catch { data = {}; }
+    showPing(data.summary || 'Board updated', data.taskId ? `/tasks/${data.taskId}` : location.pathname);
+    refreshContent().catch(() => {});
+  });
+  sse.addEventListener('notify', (event) => {
+    let data = {};
+    try { data = JSON.parse(event.data || '{}'); } catch { data = {}; }
+    if (data.count != null) setMentionCount(data.count);
+    showPing(data.text || 'Update', data.href || '/');
+  });
+  sse.onerror = () => {
+    sseLive = false;
+    sse.close();
+    document.dispatchEvent(new CustomEvent('sse-state', { detail: { ok: false } }));
+    window.clearTimeout(sseTimer);
+    sseTimer = window.setTimeout(connectSse, 5000);
+  };
+}
+connectSse();
 
 const taskWait = document.querySelector('[data-grok-task]');
 if (taskWait) {
@@ -1173,13 +1298,14 @@ if (taskWait) {
   const live = taskWait.querySelector('[data-grok-live]');
   let wasWaiting = true;
   window.setInterval(async () => {
+    if (sseLive) return;
     const response = await fetch(`/api/grok/tasks/${taskId}`, { headers: { accept: 'application/json' } });
     if (!response.ok) return;
     const state = await response.json();
-    if (live) live.textContent = state.live || '';
-    if (wasWaiting && !state.waiting) window.location.reload();
+    if (live && live.isConnected) live.textContent = state.live || '';
+    if (wasWaiting && !state.waiting) refreshContent().catch(() => {});
     wasWaiting = Boolean(state.waiting);
-  }, 3000);
+  }, 15000);
 }
 
 if (new URLSearchParams(location.search).get('toast') === 'done' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

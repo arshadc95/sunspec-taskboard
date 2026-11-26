@@ -32,6 +32,7 @@ import {
   stopTimersOnTask,
   updateTask,
 } from './db.js';
+import { boardChanged } from './events.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canEditTask } from './permissions.js';
 import { isValidDate } from './time.js';
@@ -319,7 +320,9 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
     });
     const grok = grokUser();
     addActivity(db, { taskId: id, actorId: grok.id, action: 'created', detail: behalf(actor, 'Created the task') });
-    json(res, 201, { task: taskJson(getTask(db, id)) });
+    const created = getTask(db, id);
+    boardChanged({ actor: 'Grok', summary: `Grok added: ${created.title}`, taskId: id });
+    json(res, 201, { task: taskJson(created) });
   });
 
   router.patch('/tasks/:id', (req, res) => {
@@ -389,6 +392,7 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
       (task.due_date || '') !== (updated.due_date || '') ? 'due' : '',
     ].filter(Boolean).join(', ') || 'details';
     addActivity(db, { taskId: task.id, actorId: grokUser().id, action: 'updated', detail: behalf(actor, `Updated ${changed}`) });
+    boardChanged({ actor: 'Grok', summary: `Grok updated: ${updated.title}`, taskId: task.id });
     json(res, 200, { task: taskJson(updated) });
   });
 
@@ -406,6 +410,7 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
     setCommentMentions(db, commentId, ids.filter((id) => id !== grok.id));
     clearGrokLiveForTask(db, task.id);
     addActivity(db, { taskId: task.id, actorId: grok.id, action: 'comment', detail: behalf(actor, 'Added a comment') });
+    boardChanged({ actor: 'Grok', summary: `Grok updated: ${task.title}`, taskId: task.id });
     json(res, 201, { comment: { id: commentId, author: 'Grok', body } });
   });
 
@@ -523,6 +528,7 @@ export function mountBot(app, { db, config, grokUser, grokDir }) {
       });
       stopTimersOnTask(db, task.id);
       addActivity(db, { taskId: task.id, actorId: grokUser().id, action: 'status', detail: behalf(actor, 'Marked the task done') });
+      boardChanged({ actor: 'Grok', summary: `Grok completed: ${task.title}`, taskId: task.id });
     }
     json(res, 200, { task: taskJson(getTask(db, task.id)) });
   });

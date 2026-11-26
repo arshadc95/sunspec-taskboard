@@ -70,9 +70,14 @@ import {
   renameGrokThread,
   taskGrokLive,
   unansweredGrokMention,
+  addManualEntry,
+  capRunningTimers,
+  deleteTimeEntry,
   getRunningTimer,
+  getTimeEntry,
   markMentionsRead,
   myDay,
+  updateTimeEntry,
   notifyMentions,
   setCommentMentions,
   setTaskMentions,
@@ -87,7 +92,8 @@ import {
 import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
-import { entrySeconds, formatDue, formatDuration, isValidDate, todayDate } from './time.js';
+import { boardChanged, closeAll, subscribe } from './events.js';
+import { durationFromParts, entrySeconds, entryStart, formatDue, formatDuration, formatDurationClock, isValidDate, parseDuration, todayDate } from './time.js';
 import { buildManage } from './manage.js';
 import { fileExpiry, grokConnected, grokFileExpiry, isPdf, mountBot, pdfFilename, postGrokWebhook, rateLimitMessage, recentContext, webhookFiles } from './grok.js';
 import {
@@ -372,6 +378,26 @@ export function createApp(config) {
     next();
   }
 
+  app.get('/events', (req, res) => {
+    if (!req.user) return res.status(401).end();
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write(': connected\n\n');
+    const stop = subscribe(req.user.id, res);
+    const beat = setInterval(() => {
+      try { res.write(': heartbeat\n\n'); } catch { /* closed */ }
+    }, 25000);
+    beat.unref?.();
+    req.on('close', () => {
+      clearInterval(beat);
+      stop();
+    });
+  });
+
   app.get('/', requireUser, (req, res) => {
     const filters = readFilters(req);
     const tasks = withTime(db, listTasks(db, filters));
@@ -514,9 +540,10 @@ export function createApp(config) {
     const quick = req.body.quick === '1';
     if (quick && !parsed.title) return res.redirect('/?msg=invalid');
     const id = createTask(db, { ...parsed, projectId, createdBy: req.user.id });
-    notifyMentions(db, { taskId: id, userIds: (parsed.assigneeIds || []).filter((userId) => userId !== req.user.id), actorId: req.user.id });
+    notifyMentions(db, { taskId: id, userIds: (parsed.assigneeIds || []).filter((userId) => userId !== req.user.id), actorId: req.user.id, text: `Assigned: ${parsed.title}` });
     rememberMentions(db, id, `${parsed.title}\n${parsed.description}`, req.user.id);
     addActivity(db, { taskId: id, actorId: req.user.id, action: 'created', detail: 'Created the task' });
+    noteTask(req.user, 'added', { id, title: parsed.title });
     if (quick || req.body.from === 'board') {
       const again = req.body.again === '1';
       return res.redirect(again ? `/?newtask=1&highlight=${id}` : `/?highlight=${id}`);
@@ -580,9 +607,10 @@ export function createApp(config) {
     if (projectId === false) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     const updated = updateTask(db, task.id, { ...parsed, projectId });
     const added = (updated?.assignee_ids || []).filter((userId) => !(task.assignee_ids || []).includes(userId) && userId !== req.user.id);
-    notifyMentions(db, { taskId: task.id, userIds: added, actorId: req.user.id });
+    notifyMentions(db, { taskId: task.id, userIds: added, actorId: req.user.id, text: `Assigned: ${updated.title}` });
     logTaskChanges(db, req.user, task, updated);
     rememberMentions(db, task.id, `${parsed.title}\n${parsed.description}`, req.user.id);
+    noteTask(req.user, 'updated', updated);
     res.redirect(`/tasks/${task.id}?msg=saved`);
   });
 
@@ -623,6 +651,61 @@ export function createApp(config) {
     if (!stopped) return res.redirect(timerReturn(req, task.id, 'notimer'));
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: 'Stopped the timer' });
     res.redirect(timerReturn(req, task.id, 'stopped'));
+  });
+
+  app.post('/tasks/:id/time', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const seconds = readDuration(req.body);
+    const startedAt = entryStart(String(req.body.date || todayDate()));
+    if (!seconds || !startedAt) return res.redirect(`/tasks/${task.id}?msg=invalid`);
+    let userId = req.user.id;
+    if (req.user.role === 'superuser' && numericId(req.body.user_id)) {
+      const person = getUser(db, numericId(req.body.user_id));
+      if (!person || !person.active || person.is_bot) return res.redirect(`/tasks/${task.id}?msg=invalid`);
+      userId = person.id;
+    }
+    const note = String(req.body.note || '').trim().slice(0, 120);
+    addManualEntry(db, { taskId: task.id, userId, startedAt, seconds, note });
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: `Logged ${formatDurationClock(seconds)}` });
+    res.redirect(`/tasks/${task.id}?msg=saved`);
+  });
+
+  app.post('/tasks/:id/time/:entryId', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const taskId = numericId(req.params.id);
+    const entry = getTimeEntry(db, numericId(req.params.entryId));
+    if (!taskId || !entry || entry.task_id !== taskId) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (req.user.role !== 'superuser' && entry.user_id !== req.user.id) {
+      return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    }
+    const seconds = readDuration(req.body);
+    const startedAt = entryStart(String(req.body.date || ''));
+    if (!seconds || !startedAt) return res.redirect(`/tasks/${taskId}?msg=invalid`);
+    const before = entrySeconds(entry.started_at, entry.ended_at);
+    const note = String(req.body.note || '').trim().slice(0, 120);
+    updateTimeEntry(db, entry.id, { startedAt, seconds, note });
+    const detail = before === seconds
+      ? 'Updated a time entry'
+      : `Amended time from ${formatDurationClock(before)} to ${formatDurationClock(seconds)}`;
+    addActivity(db, { taskId, actorId: req.user.id, action: 'timer', detail });
+    res.redirect(`/tasks/${taskId}?msg=saved`);
+  });
+
+  app.post('/tasks/:id/time/:entryId/delete', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const taskId = numericId(req.params.id);
+    const entry = getTimeEntry(db, numericId(req.params.entryId));
+    if (!taskId || !entry || entry.task_id !== taskId) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (req.user.role !== 'superuser' && entry.user_id !== req.user.id) {
+      return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    }
+    const seconds = entrySeconds(entry.started_at, entry.ended_at);
+    deleteTimeEntry(db, entry.id);
+    addActivity(db, { taskId, actorId: req.user.id, action: 'timer', detail: `Deleted ${formatDurationClock(seconds)} of logged time` });
+    res.redirect(`/tasks/${taskId}?msg=saved`);
   });
 
   app.post('/tasks/:id/review', requireUser, (req, res) => {
@@ -675,6 +758,7 @@ export function createApp(config) {
       logTaskChanges(db, req.user, task, updated);
       stopTimersOnTask(db, task.id);
       addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Marked the task done' });
+      noteTask(req.user, 'completed', task);
     }
     const back = safeNext(String(req.body.back || '/'));
     const join = back.includes('?') ? '&' : '?';
@@ -712,6 +796,7 @@ export function createApp(config) {
     if (!canRemoveTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     deleteTask(db, task.id);
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Removed the task' });
+    noteTask(req.user, 'removed', task);
     res.redirect(safeNext(String(req.body.back || '/?msg=deleted')));
   });
 
@@ -1125,6 +1210,25 @@ export function createApp(config) {
     res.status(500).type('text').send('Something went wrong.');
   });
 
+  const guard = setInterval(() => {
+    try { capRunningTimers(db); } catch (error) { console.error(error); }
+  }, 5 * 60 * 1000);
+  guard.unref?.();
+  app.locals.stopBackground = () => {
+    clearInterval(guard);
+    closeAll();
+  };
+  const listen = app.listen.bind(app);
+  app.listen = (...args) => {
+    const server = listen(...args);
+    const end = server.close.bind(server);
+    server.close = (callback) => {
+      app.locals.stopBackground();
+      return end(callback);
+    };
+    return server;
+  };
+
   return app;
 }
 
@@ -1228,6 +1332,20 @@ function rememberMentions(db, taskId, text, actorId) {
   const ids = activeUserIds(db, mentionedUserIds(text, listActiveUsers(db)));
   setTaskMentions(db, taskId, ids);
   notifyMentions(db, { taskId, userIds: ids, actorId });
+}
+
+function readDuration(body) {
+  const typed = parseDuration(body.duration);
+  if (typed) return typed;
+  if (String(body.hours || '').trim() || String(body.minutes || '').trim()) return durationFromParts(body.hours, body.minutes);
+  return null;
+}
+
+function noteTask(actor, verb, task) {
+  const grok = actor?.is_bot || actor?.name === 'Grok';
+  const name = grok ? 'Grok' : (actor?.name || 'Someone');
+  const summary = grok ? `Grok ${verb}: ${task.title}` : `${name} ${verb}: ${task.title}`;
+  boardChanged({ actor: name, summary, taskId: task.id });
 }
 
 function timerReturn(req, taskId, msg) {

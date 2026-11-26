@@ -85,6 +85,54 @@ export function startOfMonthIso(now = new Date()) {
   return new Date(Date.UTC(year, month - 1, 1, -2, 0, 0)).toISOString();
 }
 
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+
+export function timerStopAt(startedAt) {
+  const startMs = Date.parse(startedAt);
+  if (!Number.isFinite(startMs)) return null;
+  const day = todayDate(new Date(startMs));
+  const eighteen = Date.parse(`${day}T18:00:00+02:00`);
+  const midnight = Date.parse(`${shiftDate(day, 1)}T00:00:00+02:00`);
+  const fourHours = startMs + FOUR_HOURS_MS;
+  const cap = startMs < eighteen ? Math.min(fourHours, eighteen) : Math.min(fourHours, midnight);
+  return new Date(cap).toISOString();
+}
+
+export function parseDuration(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return null;
+  let seconds = 0;
+  let saw = false;
+  const hours = /(\d+(?:\.\d+)?)\s*h/.exec(text);
+  const minutes = /(\d+)\s*m/.exec(text);
+  if (hours) {
+    seconds += Math.round(Number(hours[1]) * 3600);
+    saw = true;
+  }
+  if (minutes) {
+    seconds += Number(minutes[1]) * 60;
+    saw = true;
+  }
+  if (!saw || seconds <= 0 || seconds > 24 * 3600) return null;
+  return seconds;
+}
+
+export function durationFromParts(hours, minutes) {
+  const h = Number(hours || 0);
+  const m = Number(minutes || 0);
+  if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || m < 0) return null;
+  const seconds = Math.round(h * 3600 + m * 60);
+  if (seconds <= 0 || seconds > 24 * 3600) return null;
+  return seconds;
+}
+
+export function entryStart(ymd) {
+  if (!isValidDate(ymd)) return null;
+  const ms = Date.parse(`${ymd}T08:00:00+02:00`);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString();
+}
+
 export function entrySeconds(startedAt, endedAt, now = Date.now()) {
   const start = Date.parse(startedAt);
   const end = endedAt ? Date.parse(endedAt) : now;
@@ -101,6 +149,13 @@ export function formatDuration(seconds) {
   if (minutes) return `${minutes}m`;
   if (total >= 1) return `${total}s`;
   return '0m';
+}
+
+export function formatDurationClock(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return `${hours}h ${String(minutes).padStart(2, '0')}m`;
 }
 
 export function daysBetween(due, today) {
