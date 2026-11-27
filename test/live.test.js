@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { backdropCloses } from '../public/dialog-close.js';
-import { capRunningTimers, createTask, createUser, openDatabase } from '../src/db.js';
+import { capRunningTimers, createTask, createUser, deleteTask, openDatabase, unreadMentionCount } from '../src/db.js';
 import { publish } from '../src/events.js';
 import { createApp } from '../src/server.js';
 import { parseDuration, timerStopAt } from '../src/time.js';
@@ -20,6 +20,10 @@ test('clicking a dropdown item never closes the modal', () => {
   assert.match(source, /menu\.addEventListener\('mousedown', \(event\) => event\.stopPropagation\(\)\)/);
   assert.match(source, /menu\.addEventListener\('click', \(event\) => event\.stopPropagation\(\)\)/);
   assert.match(source, /backdropCloses\(down, event\.target, dialog\)/);
+  assert.match(source, /function bindShell\(/);
+  assert.match(source, /function bindContent\(/);
+  assert.match(source, /pagehide/);
+  assert.doesNotMatch(source, /function bindPage\(/);
 });
 
 test('duration text accepts hours and minutes', () => {
@@ -177,6 +181,11 @@ test('people can amend their own time and a superuser can amend anyone', { timeo
     const taskId = Number(created.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
     const detail = await page(base, sam.cookies, `/tasks/${taskId}`);
     assert.match(detail.text, /Log time/);
+    assert.doesNotMatch(detail.text, /name="hours"/);
+    assert.doesNotMatch(detail.text, /name="minutes"/);
+    assert.match(detail.text, /rows="3"/);
+    assert.ok(detail.text.indexOf('>Comments') < detail.text.indexOf('Files and activity'));
+    assert.match(detail.text, /class="task-col"/);
     const logged = await post(base, sam.cookies, `/tasks/${taskId}/time`, {
       _csrf: detail.csrf,
       duration: '20h 48m',
@@ -269,4 +278,84 @@ test('the event stream reaches the signed-in user and closes on shutdown', { tim
   const closed = await reader.read();
   assert.equal(closed.done, true);
   db.close();
+});
+
+test('mentions ignore deleted tasks and only open Done when one is unread', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-mentions-'));
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'board.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const users = await page(base, admin.cookies, '/users');
+    await post(base, admin.cookies, '/users', {
+      _csrf: users.csrf,
+      name: 'Sam Cole',
+      email: 'sam@example.com',
+      password: 'password1',
+      role: 'user',
+    });
+    const samId = db.prepare("SELECT id FROM users WHERE email = 'sam@example.com'").get().id;
+    const form = await page(base, admin.cookies, '/tasks/new');
+    const created = await post(base, admin.cookies, '/tasks', {
+      _csrf: form.csrf,
+      title: 'Site visit',
+      description: `Ask @[Sam Cole](${samId}) to bring the meter`,
+      status: 'todo',
+      priority: '',
+      due_date: '',
+      assignee_id: String(samId),
+      project_id: '',
+      new_project: '',
+    });
+    const taskId = Number(created.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    const done = await post(base, admin.cookies, `/tasks/${taskId}/complete`, { _csrf: form.csrf, back: '/' });
+    assert.equal(done.status, 302);
+    const sam = await login(base, 'sam@example.com', 'password1');
+    const open = await page(base, sam.cookies, '/?mentions=1');
+    assert.match(open.text, /Mark all read/);
+    assert.match(open.text, /nav-badge/);
+    assert.match(open.text, /aria-expanded="true"/);
+    assert.doesNotMatch(open.text, /class="done-rows" hidden/);
+    assert.match(open.text, /class="unread-mark"/);
+    assert.match(open.text, /class="mention-snip"/);
+    assert.match(open.text, /bring the meter/);
+    const cleared = await post(base, sam.cookies, '/mentions/read', { _csrf: open.csrf });
+    assert.equal(cleared.status, 302);
+    const after = await page(base, sam.cookies, '/?mentions=1');
+    assert.equal(unreadMentionCount(db, samId), 0);
+    assert.doesNotMatch(after.text, /nav-badge/);
+    assert.match(after.text, /Site visit/);
+    assert.match(after.text, /class="done-rows" hidden/);
+    const ghostId = createTask(db, {
+      title: 'Gone',
+      description: '',
+      assigneeId: samId,
+      assigneeIds: [samId],
+      status: 'todo',
+      priority: null,
+      dueDate: null,
+      projectId: null,
+      createdBy: samId,
+    });
+    db.prepare('INSERT INTO mention_notices (user_id, task_id, created_at) VALUES (?, ?, ?)').run(samId, ghostId, new Date().toISOString());
+    assert.equal(unreadMentionCount(db, samId), 1);
+    deleteTask(db, ghostId);
+    assert.equal(unreadMentionCount(db, samId), 0);
+    db.prepare('INSERT INTO mention_notices (user_id, task_id, created_at) VALUES (?, ?, ?)').run(samId, ghostId, new Date().toISOString());
+    assert.equal(unreadMentionCount(db, samId), 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
 });

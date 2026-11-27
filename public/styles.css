@@ -184,6 +184,8 @@ a { color: inherit; }
   padding: 10px 16px;
 }
 .sheet-title svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.sheet-title .sheet-action { margin-left: auto; }
+.sheet-title .btn { background: #fff; color: #111; border: 0; height: 28px; text-transform: none; letter-spacing: 0; font-weight: 700; }
 .sheet-body { padding: 16px; }
 .sheet-body.flush { padding: 0; }
 .sheet-body.flush .table-wrap { border: 0; }
@@ -330,9 +332,12 @@ tr.task-row:hover td { background: #fff7ed; }
 .time-total { margin: 8px 0; }
 .time-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .time-log li { border-top: 1px solid var(--line); padding-top: 6px; }
-.time-add, .time-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; }
-.time-add .field, .time-edit input, .time-add input, .time-add select { min-width: 0; }
-.time-add input, .time-edit input, .time-add select { height: 32px; }
+.time-add, .time-edit { display: flex; flex-direction: column; gap: 6px; }
+.time-row { display: flex; gap: 6px; align-items: center; }
+.time-row input { flex: 1; min-width: 0; height: 32px; }
+.time-row .btn { flex: 0 0 auto; height: 32px; }
+.time-add .field, .time-edit input, .time-add select { min-width: 0; }
+.time-add select, .time-edit input { height: 32px; }
 .ping {
   position: fixed;
   top: 16px;
@@ -573,18 +578,15 @@ tr.task-row:hover td { background: #fff7ed; }
   gap: 12px;
   align-items: start;
 }
-.task-layout > .task-form { display: contents; }
-.task-details { grid-column: 1; grid-row: 1; }
-.task-side { grid-column: 2; grid-row: 1; min-width: 0; }
-.task-time { grid-column: 2; grid-row: 2; align-self: start; min-width: 0; }
-.task-rest { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.task-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.task-col > .panel { margin-top: 0; }
 .task-layout .form-card h2,
 .task-layout .panel > h2 {
-  padding: 6px 12px;
+  padding: 8px 12px;
   font-size: 11px;
-  margin: 0;
+  margin: 0 0 10px;
 }
-.task-layout .form-card > .field { padding: 8px 12px; }
+.task-layout .form-card > .field { padding: 10px 12px; }
 .task-layout .form-card > .pair { padding: 0; }
 .task-layout .task-side .pair { grid-template-columns: 1fr; gap: 0; }
 .task-layout .task-form input:not([type="hidden"]),
@@ -592,7 +594,13 @@ tr.task-row:hover td { background: #fff7ed; }
   height: 32px;
 }
 .task-layout .title-input { font-size: 16px; }
-.task-layout textarea[name="description"] { min-height: 96px; padding: 6px 10px; line-height: 1.4; }
+.task-layout textarea[name="description"] {
+  min-height: 4.6em;
+  max-height: 9em;
+  padding: 6px 10px;
+  line-height: 1.4;
+  field-sizing: content;
+}
 .task-layout .segments,
 .task-layout .chips { width: 100%; }
 .task-layout .seg,
@@ -601,12 +609,18 @@ tr.task-row:hover td { background: #fff7ed; }
 .task-layout .due-row .chips { flex-wrap: wrap; }
 .task-layout .due-row input[type="date"] { width: 100%; flex: none; }
 .task-layout .meta { margin: 0; padding: 0 12px 10px; line-height: 1.4; }
-.task-layout .panel.pad { padding-bottom: 8px; }
+.task-layout .panel.pad { padding-bottom: 10px; }
+.task-layout .panel.pad > *:not(h1):not(h2) { padding-left: 12px; padding-right: 12px; }
 .task-layout .comment { padding: 6px 0; }
+.slim-fold { background: #fff; }
+.slim-fold summary { cursor: pointer; background: #000; color: #fff; padding: 8px 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.unread-mark { display: inline-block; width: 6px; height: 6px; background: #f97316; margin-right: 6px; vertical-align: middle; }
+tr.is-unread { background: #fff7ed; }
+.task-card.is-unread { box-shadow: inset 3px 0 0 #f97316; }
+.mention-snip { display: block; margin-top: 2px; color: #555; font-size: 12px; font-weight: 500; }
 .title-actions .btn { height: 32px; padding: 0 10px; }
 @media (max-width: 800px) {
   .task-layout { grid-template-columns: 1fr; }
-  .task-details, .task-side, .task-rest, .task-time { grid-column: 1; grid-row: auto; }
   .content:has(.task-layout) { padding-right: 64px; padding-bottom: 96px; }
 }
 .form-footer .btn { height: 36px; flex: 0 0 auto; min-width: 140px; border-radius: 0; font-weight: 700; }

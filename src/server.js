@@ -75,6 +75,8 @@ import {
   deleteTimeEntry,
   getRunningTimer,
   getTimeEntry,
+  attachMentionHints,
+  markAllMentionsRead,
   markMentionsRead,
   myDay,
   updateTimeEntry,
@@ -386,6 +388,7 @@ export function createApp(config) {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    res.flushHeaders?.();
     res.write(': connected\n\n');
     const stop = subscribe(req.user.id, res);
     const beat = setInterval(() => {
@@ -398,9 +401,17 @@ export function createApp(config) {
     });
   });
 
+  app.post('/mentions/read', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    markAllMentionsRead(db, req.user.id);
+    res.redirect('/?mentions=1');
+  });
+
   app.get('/', requireUser, (req, res) => {
     const filters = readFilters(req);
-    const tasks = withTime(db, listTasks(db, filters));
+    const listed = listTasks(db, filters);
+    if (filters.mentions) attachMentionHints(db, listed, req.user.id);
+    const tasks = withTime(db, listed);
     const people = listActiveUsers(db);
     html(res, 200, renderBoard({
       user: req.user,

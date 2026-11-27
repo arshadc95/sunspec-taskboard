@@ -128,8 +128,8 @@ function sheetIcon(name) {
   return ICONS[name] || ICONS.tasks;
 }
 
-function sheet(title, inner, flush = false, icon = 'tasks') {
-  return `<section class="sheet"><header class="sheet-title">${sheetIcon(icon)}<span>${esc(title)}</span></header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
+function sheet(title, inner, flush = false, icon = 'tasks', extra = '') {
+  return `<section class="sheet"><header class="sheet-title">${sheetIcon(icon)}<span>${esc(title)}</span>${extra}</header><div class="sheet-body${flush ? ' flush' : ''}">${inner}</div></section>`;
 }
 
 function peopleScript(users) {
@@ -401,7 +401,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
           <input class="title-input" name="title" required maxlength="200" value="${esc(value.title || '')}" placeholder="What needs doing?" ${off} ${!value.id && canEdit && autofocus ? 'autofocus' : ''}>
         </label>
         <label class="field"><span>Description</span>
-          <textarea name="description" data-mentions rows="4" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
+          <textarea name="description" data-mentions rows="3" maxlength="20000" placeholder="Add detail. Type @ to mention someone." ${off}>${esc(value.description || '')}</textarea>
         </label>
       </section>
       <aside class="task-side">
@@ -441,8 +441,14 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
           ${metaHtml}
         </section>
       </aside>`;
-    if (!canEdit) return `<div class="task-form is-readonly">${body}</div>`;
-    return `<form id="task-edit" class="task-form task-edit" method="post" action="${action}">${body}</form>`;
+    const linked = canEdit ? ' form="task-edit"' : '';
+    const details = body.match(/<section class="form-card task-details">[\s\S]*?<\/section>/)?.[0] || '';
+    const aside = (body.match(/<aside class="task-side">[\s\S]*<\/aside>/)?.[0] || '').replace(/<(input|select|textarea)\b/g, `<$1${linked}`);
+    const head = `<input type="hidden" name="_csrf" value="${esc(csrf)}">${from ? `<input type="hidden" name="from" value="${esc(from)}">` : ''}`;
+    if (!canEdit) {
+      return `<div class="task-col"><div class="task-form is-readonly">${details}</div><!--REST--></div><div class="task-col">${aside}<!--RAIL--></div>`;
+    }
+    return `<div class="task-col"><form id="task-edit" class="task-form task-edit" method="post" action="${action}">${head}${details}</form><!--REST--></div><div class="task-col">${aside}<!--RAIL--></div>`;
   }
   if (!canEdit) return `<div class="task-form is-readonly">${fields}</div>`;
   const action = task?.id ? `/tasks/${value.id}` : '/tasks';
@@ -564,10 +570,19 @@ function rowStatusActions(task, user, csrf, back, prominent = false) {
   return `${reviewControl(task, user, back)}${completeControl(task, user, csrf, back, prominent)}`;
 }
 
+function mentionBits(task) {
+  const mark = task.unreadMention ? '<i class="unread-mark" title="Unread mention"></i>' : '';
+  const snip = task.mentionSnippet?.text
+    ? `<span class="mention-snip"><strong>${esc(task.mentionSnippet.author)}</strong> ${esc(task.mentionSnippet.text)}</span>`
+    : '';
+  return { mark, snip, unread: task.unreadMention ? ' is-unread' : '' };
+}
+
 function taskCard(task, today, user, csrf, back) {
   const overdue = isOverdue(task.due_date, task.status, today);
-  return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <div class="card-top"><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}</div>
+  const mention = mentionBits(task);
+  return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
+    <div class="card-top">${mention.mark}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}${mention.snip}</div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${task.assignees?.length ? assigneeCell(task) : 'Unassigned'}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
@@ -583,8 +598,9 @@ function taskCard(task, today, user, csrf, back) {
 function taskRow(task, today, user, csrf, back, highlight) {
   const overdue = isOverdue(task.due_date, task.status, today);
   const added = String(highlight || '') === String(task.id);
-  return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}" data-href="/tasks/${task.id}">
-    <td><a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}</td>
+  const mention = mentionBits(task);
+  return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
+    <td>${mention.mark}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}${mention.snip}</td>
     <td>${esc(task.project_name || '—')}</td>
     <td>${assigneeCell(task)}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
@@ -605,7 +621,9 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
     rows: tasks.filter((task) => task.status === status),
   })).filter((group) => group.rows.length);
   const doneRows = tasks.filter((task) => task.status === 'done');
-  const showDone = filters.status === 'done' || doneRows.some((task) => String(task.id) === String(highlight || ''));
+  const showDone = filters.status === 'done'
+    || doneRows.some((task) => String(task.id) === String(highlight || ''))
+    || (filters.mentions && doneRows.some((task) => task.unreadMention));
   const cards = tasks.filter((task) => task.status !== 'done' || showDone).map((task) => taskCard(task, today, user, csrf, back)).join('');
   const table = `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
@@ -662,9 +680,12 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         <a class="btn btn-tiny" href="/">Clear</a>
       </form>`;
   const tasksBody = `${filtersHtml}${openGroups.length || doneRows.length ? table : '<p class="empty">No tasks match these filters.</p>'}`;
+  const markRead = filters.mentions
+    ? `<form class="sheet-action" method="post" action="/mentions/read"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-tiny" type="submit">Mark all read</button></form>`
+    : '';
   const body = `
     ${myDayHtml}
-    ${sheet(filters.mentions ? 'Mentions' : 'Tasks', tasksBody, true, filters.mentions ? 'at' : 'tasks')}
+    ${sheet(filters.mentions ? 'Mentions' : 'Tasks', tasksBody, true, filters.mentions ? 'at' : 'tasks', markRead)}
       <dialog id="task-drawer" class="drawer"${openForm ? ' data-open="1"' : ''}>
       <div class="drawer-bar"><h2>New task</h2><button type="button" class="drawer-close" data-close-drawer aria-label="Close">×</button></div>
       ${taskForm({ task: null, users, projects, csrf, canEdit: true, currentUser: user, today, from: 'board', autofocus: false })}
@@ -731,12 +752,14 @@ function renderTimer(task, csrf, timer, user, users, today) {
     <form class="time-add" method="post" action="/tasks/${task.id}/time">
       <input type="hidden" name="_csrf" value="${esc(csrf)}">
       ${logFor}
-      <label class="field"><span>Duration</span><input name="duration" placeholder="1h 30m" aria-label="Duration"></label>
-      <label class="field"><span>Hours</span><input name="hours" inputmode="decimal" placeholder="0" aria-label="Hours"></label>
-      <label class="field"><span>Minutes</span><input name="minutes" inputmode="numeric" placeholder="0" aria-label="Minutes"></label>
-      <label class="field"><span>Date</span><input type="date" name="date" required value="${esc(today || '')}" aria-label="Date"></label>
-      <label class="field"><span>Note</span><input name="note" maxlength="120" placeholder="Optional" aria-label="Note"></label>
-      <button class="btn" type="submit">Log time</button>
+      <div class="time-row">
+        <input name="duration" required placeholder="1h 30m" aria-label="Duration">
+        <input type="date" name="date" required value="${esc(today || '')}" aria-label="Date">
+      </div>
+      <div class="time-row">
+        <input name="note" maxlength="120" placeholder="Note" aria-label="Note">
+        <button class="btn" type="submit">Log time</button>
+      </div>
     </form>
   </section>`;
 }
@@ -811,10 +834,10 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
     body: `
       <div class="title-row"><h1>${esc(title)}</h1>${pageActions}</div>
       <div class="task-layout">
-      ${taskForm({ task, users, projects, csrf, canEdit: editable, currentUser: user, today, split: true, metaHtml: meta })}
-      ${renderTimer(task, csrf, timer, user, users, today)}
-      <div class="task-rest">
-      ${isNew ? '' : `<section class="panel pad">
+      ${taskForm({ task, users, projects, csrf, canEdit: editable, currentUser: user, today, split: true, metaHtml: meta })
+        .replace('<!--REST-->', `${commentBlock}${isNew ? '' : `<details class="slim-fold">
+        <summary>Files and activity</summary>
+        <section class="panel pad">
         <h2>Files</h2>
         ${attachments.length ? `<ul class="files">${attachments.map((file) => {
           const removable = user.role === 'superuser' || user.role === 'admin' || file.uploaded_by === user.id;
@@ -835,10 +858,9 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
       </section>
       <section class="panel pad">
         <h2>Activity</h2>
-        ${activity.length ? activity.map((item) => `<p class="activity"><strong>${esc(item.actor_name)}</strong> ${esc(item.detail)} <time>${esc(formatDateTime(item.created_at))}</time></p>`).join('') : '<p class="hint">No history yet.</p>'}
-      </section>`}
-      ${commentBlock}
-      </div>
+        ${activity.length ? activity.map((item) => `<p class="activity"><strong>${esc(item.actor_name)}</strong> ${esc(item.detail)} <time>${esc(formatDateTime(item.created_at))}</time></p>`).join('') : '<p class="hint">No history yet.</p>'}</section>
+      </details>`}`)
+        .replace('<!--RAIL-->', renderTimer(task, csrf, timer, user, users, today))}
       </div>
       ${projectScript(projects)}
       ${isNew ? '' : reviewDialog(csrf)}`,

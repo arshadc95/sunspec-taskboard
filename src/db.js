@@ -500,8 +500,12 @@ export function listTasks(db, filters) {
         SELECT 1 FROM task_mentions tm
         WHERE tm.task_id = t.id AND tm.user_id = ?
       )
+      OR EXISTS (
+        SELECT 1 FROM mention_notices nt
+        WHERE nt.task_id = t.id AND nt.user_id = ? AND nt.read_at IS NULL
+      )
     )`);
-    params.push(filters.mentionUserId, filters.mentionUserId);
+    params.push(filters.mentionUserId, filters.mentionUserId, filters.mentionUserId);
   }
   if (filters.search) {
     where.push("(t.title LIKE ? ESCAPE '\\' OR IFNULL(t.description, '') LIKE ? ESCAPE '\\' OR IFNULL(p.name, '') LIKE ? ESCAPE '\\')");
@@ -673,6 +677,7 @@ export function updateTask(db, id, fields) {
 export function deleteTask(db, id) {
   const now = new Date().toISOString();
   db.prepare('UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL').run(now, id);
+  db.prepare('DELETE FROM mention_notices WHERE task_id = ?').run(id);
   db.prepare('UPDATE tasks SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, now, id);
 }
 
@@ -723,6 +728,19 @@ export function deleteComment(db, id) {
   if (!comment) return null;
   db.prepare('DELETE FROM comment_mentions WHERE comment_id = ?').run(id);
   db.prepare('DELETE FROM comments WHERE id = ?').run(id);
+  db.prepare(`
+    DELETE FROM mention_notices
+    WHERE task_id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM comments c
+        JOIN comment_mentions mn ON mn.comment_id = c.id
+        WHERE c.task_id = mention_notices.task_id AND mn.user_id = mention_notices.user_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM task_mentions tm
+        WHERE tm.task_id = mention_notices.task_id AND tm.user_id = mention_notices.user_id
+      )
+  `).run(comment.task_id);
   db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), comment.task_id);
   return comment;
 }
@@ -1188,7 +1206,50 @@ export function notifyMentions(db, { taskId, userIds, actorId, text }) {
 }
 
 export function unreadMentionCount(db, userId) {
-  return db.prepare('SELECT COUNT(DISTINCT task_id) AS n FROM mention_notices WHERE user_id = ? AND read_at IS NULL').get(userId).n;
+  return db.prepare(`
+    SELECT COUNT(DISTINCT n.task_id) AS n
+    FROM mention_notices n
+    JOIN tasks t ON t.id = n.task_id AND t.deleted_at IS NULL
+    WHERE n.user_id = ? AND n.read_at IS NULL
+  `).get(userId).n;
+}
+
+export function markAllMentionsRead(db, userId) {
+  db.prepare('UPDATE mention_notices SET read_at = ? WHERE user_id = ? AND read_at IS NULL').run(new Date().toISOString(), userId);
+}
+
+function mentionExcerpt(body) {
+  const text = String(body || '').replace(/@\[([^\]]*)\]\(\d+\)/g, '@$1').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length <= 90 ? text : `${text.slice(0, 87)}…`;
+}
+
+export function attachMentionHints(db, tasks, userId) {
+  if (!tasks.length) return tasks;
+  const ids = tasks.map((task) => task.id);
+  const marks = ids.map(() => '?').join(',');
+  const unread = new Set(db.prepare(`
+    SELECT n.task_id FROM mention_notices n
+    WHERE n.user_id = ? AND n.read_at IS NULL AND n.task_id IN (${marks})
+  `).all(userId, ...ids).map((row) => row.task_id));
+  const snippets = new Map();
+  for (const row of db.prepare(`
+    SELECT c.task_id, c.body, u.name AS author_name
+    FROM comments c
+    JOIN users u ON u.id = c.author_id
+    JOIN comment_mentions mn ON mn.comment_id = c.id AND mn.user_id = ?
+    WHERE c.task_id IN (${marks})
+    ORDER BY c.id DESC
+  `).all(userId, ...ids)) {
+    if (!snippets.has(row.task_id)) snippets.set(row.task_id, { author: row.author_name, text: mentionExcerpt(row.body) });
+  }
+  for (const task of tasks) {
+    task.unreadMention = unread.has(task.id);
+    const comment = snippets.get(task.id);
+    if (comment?.text) task.mentionSnippet = comment;
+    else if (/@\[/.test(task.description || '')) task.mentionSnippet = { author: task.creator_name || 'Someone', text: mentionExcerpt(task.description) };
+  }
+  return tasks;
 }
 
 export function markMentionsRead(db, userId, taskId) {

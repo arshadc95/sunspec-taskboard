@@ -2,14 +2,6 @@ import { backdropCloses } from './dialog-close.js';
 import { acceptGrokFiles, applyGrokClick, grokFileView, grokMessageBlocks, grokQueuedLabel, grokShouldQueue, grokThreadVisible } from './grok-panel.js';
 import { cardAt, moveStandardsDeck, openStandardsDeck } from './standards-deck.js';
 
-document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
-  document.body.classList.toggle('nav-open');
-});
-
-document.querySelector('[data-nav-close]')?.addEventListener('click', () => {
-  document.body.classList.remove('nav-open');
-});
-
 document.addEventListener('submit', (event) => {
   const message = event.target.getAttribute?.('data-confirm');
   if (message && !window.confirm(message)) event.preventDefault();
@@ -28,10 +20,37 @@ function readJson(id) {
 }
 
 let openDrawer = () => {};
-let pageKeys = false;
-let unloadWatch = null;
-function bindPage() {
-const standardRoot = document.querySelector('[data-standard]');
+let taskDirty = false;
+let contentAbort = null;
+let contentSignal = null;
+
+function formatElapsed(startedAt) {
+  const start = Date.parse(startedAt);
+  if (!Number.isFinite(start)) return '';
+  const total = Math.max(0, Math.round((Date.now() - start) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function tickTimers() {
+  document.querySelectorAll('[data-started]').forEach((node) => {
+    const output = node.querySelector('.timer-elapsed');
+    if (output) output.textContent = formatElapsed(node.getAttribute('data-started'));
+  });
+}
+tickTimers();
+setInterval(tickTimers, 1000);
+
+function bindContent(root) {
+  if (!root) return;
+  contentAbort?.abort();
+  contentAbort = new AbortController();
+  contentSignal = contentAbort.signal;
+const standardRoot = root.querySelector('[data-standard]');
 const standardList = readJson('standards-data');
 if (standardRoot && standardList.length) {
   const code = standardRoot.querySelector('[data-std-code]');
@@ -64,28 +83,33 @@ if (standardRoot && standardList.length) {
   });
 }
 
-function formatElapsed(startedAt) {
-  const start = Date.parse(startedAt);
-  if (!Number.isFinite(start)) return '';
-  const total = Math.max(0, Math.round((Date.now() - start) / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  if (hours) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
+function taskEditDirty(root) {
+  const form = root.querySelector('#task-edit');
+  const saves = [...root.querySelectorAll('[data-task-save]')];
+  if (!form || !saves.length) return;
+  const serial = () => [...new FormData(form).entries()]
+    .filter(([key]) => key !== '_csrf')
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&');
+  const initial = serial();
+  taskDirty = false;
+  const refresh = () => {
+    taskDirty = serial() !== initial;
+    saves.forEach((button) => { button.disabled = !taskDirty; });
+  };
+  const signal = contentSignal;
+  form.addEventListener('input', refresh, { signal });
+  form.addEventListener('change', refresh, { signal });
+  form.addEventListener('click', refresh, { signal });
+  const side = root.querySelector('.task-side');
+  side?.addEventListener('input', refresh, { signal });
+  side?.addEventListener('change', refresh, { signal });
+  side?.addEventListener('click', refresh, { signal });
+  form.addEventListener('submit', () => { taskDirty = false; }, { signal });
+  refresh();
 }
 
-function tickTimers() {
-  document.querySelectorAll('[data-started]').forEach((node) => {
-    const output = node.querySelector('.timer-elapsed');
-    if (output) output.textContent = formatElapsed(node.getAttribute('data-started'));
-  });
-}
-tickTimers();
-setInterval(tickTimers, 1000);
-
-document.querySelectorAll('form[data-live]').forEach((form) => {
+root.querySelectorAll('form[data-live]').forEach((form) => {
   const go = () => {
     const params = new URLSearchParams();
     new FormData(form).forEach((value, key) => {
@@ -116,11 +140,11 @@ document.querySelectorAll('form[data-live]').forEach((form) => {
   form.addEventListener('change', syncCsv);
 });
 
-document.querySelectorAll('[data-filters-toggle]').forEach((button) => {
+root.querySelectorAll('[data-filters-toggle]').forEach((button) => {
   button.addEventListener('click', () => button.closest('form')?.classList.toggle('is-open'));
 });
 
-document.querySelectorAll('[data-done-toggle]').forEach((button) => {
+root.querySelectorAll('[data-done-toggle]').forEach((button) => {
   button.addEventListener('click', () => {
     const rows = button.closest('table')?.querySelector('.done-rows');
     if (!rows) return;
@@ -130,7 +154,7 @@ document.querySelectorAll('[data-done-toggle]').forEach((button) => {
   });
 });
 
-const drawer = document.getElementById('task-drawer');
+const drawer = root.querySelector('#task-drawer');
 openDrawer = () => {
   if (!drawer?.showModal) {
     window.location.href = '/tasks/new';
@@ -139,14 +163,14 @@ openDrawer = () => {
   if (!drawer.open) drawer.showModal();
   drawer.querySelector('input[name="title"]')?.focus();
 };
-document.querySelectorAll('[data-open-drawer]').forEach((link) => {
+root.querySelectorAll('[data-open-drawer]').forEach((link) => {
   link.addEventListener('click', (event) => {
     if (!drawer) return;
     event.preventDefault();
     openDrawer();
   });
 });
-document.querySelectorAll('[data-close-drawer]').forEach((button) => {
+root.querySelectorAll('[data-close-drawer]').forEach((button) => {
   button.addEventListener('click', () => drawer?.close());
 });
 if (drawer?.hasAttribute('data-open')) openDrawer();
@@ -157,7 +181,7 @@ drawer?.addEventListener('cancel', (event) => {
 wireBackdrop(drawer, () => drawer.close());
 drawer?.querySelector('.task-form')?.addEventListener('submit', () => drawer.close());
 
-const reviewDialog = document.getElementById('review-dialog');
+const reviewDialog = root.querySelector('#review-dialog');
 const reviewForm = reviewDialog?.querySelector('[data-review-form]');
 const reviewerSearch = reviewForm?.querySelector('[data-reviewer-search]');
 const reviewerId = reviewForm?.querySelector('[data-reviewer-id]');
@@ -210,7 +234,7 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
     }
   });
   const closeReview = () => { menu.hidden = true; reviewDialog.close(); };
-  document.querySelectorAll('[data-send-review]').forEach((button) => {
+  root.querySelectorAll('[data-send-review]').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.preventDefault();
       reviewForm.action = `/tasks/${button.dataset.task}/review`;
@@ -237,61 +261,18 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
     }
   });
 }
-function taskEditDirty() {
-  const form = document.querySelector('#task-edit');
-  const saves = [...document.querySelectorAll('[data-task-save]')];
-  if (!form || !saves.length) return;
-  const serial = () => [...new FormData(form).entries()]
-    .filter(([key]) => key !== '_csrf')
-    .map(([key, value]) => `${key}=${value}`)
-    .join('&');
-  const initial = serial();
-  let dirty = false;
-  const refresh = () => {
-    dirty = serial() !== initial;
-    saves.forEach((button) => { button.disabled = !dirty; });
-  };
-  form.addEventListener('input', refresh);
-  form.addEventListener('change', refresh);
-  form.addEventListener('click', refresh);
-  form.addEventListener('submit', () => { dirty = false; });
-  if (unloadWatch) window.removeEventListener('beforeunload', unloadWatch);
-  unloadWatch = (event) => {
-    if (!dirty) return;
-    event.preventDefault();
-    event.returnValue = '';
-  };
-  window.addEventListener('beforeunload', unloadWatch);
-  refresh();
-}
-taskEditDirty();
-document.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
+taskEditDirty(root);
+root.querySelectorAll('.task-form input[name="title"]').forEach((input) => {
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
-      const save = document.querySelector('#task-edit [data-task-save], [form="task-edit"][data-task-save]');
+      const save = root.querySelector('#task-edit [data-task-save], [form="task-edit"][data-task-save]');
       if (input.form?.id === 'task-edit' && save?.disabled) return;
       input.form?.requestSubmit();
     }
   });
 });
-if (!pageKeys) {
-  pageKeys = true;
-  document.addEventListener('keydown', (event) => {
-  const typing = event.target.closest('input, textarea, select');
-  if (event.key === 'n' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    event.preventDefault();
-    openDrawer();
-  }
-  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-    const form = event.target.form || event.target.closest?.('.task-form');
-    if (form?.id === 'task-edit' && document.querySelector('[data-task-save]')?.disabled) return;
-    if (form) form.requestSubmit();
-  }
-  });
-}
-
-document.querySelectorAll('[data-priority], [data-status]').forEach((button) => {
+root.querySelectorAll('[data-priority], [data-status]').forEach((button) => {
   button.addEventListener('click', () => {
     const wrap = button.parentElement;
     const attr = button.hasAttribute('data-status') ? 'data-status' : 'data-priority';
@@ -306,7 +287,7 @@ document.querySelectorAll('[data-priority], [data-status]').forEach((button) => 
   });
 });
 
-document.querySelectorAll('[data-due]').forEach((button) => {
+root.querySelectorAll('[data-due]').forEach((button) => {
   button.addEventListener('click', () => {
     const field = button.closest('.field');
     const input = field?.querySelector('[data-due-input]');
@@ -349,14 +330,14 @@ function addAssignee(field, id, name, swatchClass) {
   chips.append(chip);
   syncAssignees(field);
 }
-document.querySelectorAll('[data-remove-assignee]').forEach((button) => {
+root.querySelectorAll('[data-remove-assignee]').forEach((button) => {
   button.addEventListener('click', () => {
     const field = button.closest('[data-assignee-field]');
     button.closest('.assignee-chip')?.remove();
     if (field) syncAssignees(field);
   });
 });
-document.querySelectorAll('[data-assign-me]').forEach((button) => {
+root.querySelectorAll('[data-assign-me]').forEach((button) => {
   button.addEventListener('click', () => {
     const field = button.closest('[data-assignee-field]');
     const id = button.getAttribute('data-assign-me');
@@ -365,7 +346,7 @@ document.querySelectorAll('[data-assign-me]').forEach((button) => {
   });
 });
 function hideOtherMenus(menu) {
-  document.querySelectorAll('.combo-menu').forEach((other) => {
+  root.querySelectorAll('.combo-menu').forEach((other) => {
     if (other !== menu) other.hidden = true;
   });
 }
@@ -392,11 +373,12 @@ function placeCombo(menu, input) {
 }
 function watchMenu(menu, input) {
   const place = () => { if (!menu.hidden) placeCombo(menu, input); };
-  input.closest('.form-sections')?.addEventListener('scroll', place);
-  window.addEventListener('resize', place);
-  window.addEventListener('scroll', place, true);
+  const signal = contentSignal;
+  input.closest('.form-sections')?.addEventListener('scroll', place, { signal });
+  window.addEventListener('resize', place, { signal });
+  window.addEventListener('scroll', place, { signal, capture: true });
 }
-document.querySelectorAll('[data-assignee-search]').forEach((input) => {
+root.querySelectorAll('[data-assignee-search]').forEach((input) => {
   const field = input.closest('[data-assignee-field]');
   const menu = document.createElement('div');
   menu.className = 'combo-menu';
@@ -491,14 +473,46 @@ function attachCombo(input, hidden, items) {
   input.addEventListener('blur', () => { window.setTimeout(() => { menu.hidden = true; }, 150); });
 }
 
-document.querySelectorAll('[data-project-input]').forEach((input) => {
+root.querySelectorAll('[data-project-input]').forEach((input) => {
   attachCombo(input, input.parentElement.querySelector('[data-project-id]'), readJson('project-data'));
 });
-document.querySelectorAll('[data-user-input]').forEach((input) => {
+root.querySelectorAll('[data-user-input]').forEach((input) => {
   attachCombo(input, input.parentElement.querySelector('[data-user-id]'), readJson('people-data'));
 });
 }
-bindPage();
+
+function bindShell() {
+  document.querySelector('[data-nav-toggle]')?.addEventListener('click', () => {
+    document.body.classList.toggle('nav-open');
+  });
+  document.querySelector('[data-nav-close]')?.addEventListener('click', () => {
+    document.body.classList.remove('nav-open');
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (!taskDirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  document.addEventListener('keydown', (event) => {
+    const typing = event.target.closest('input, textarea, select');
+    if (event.key === 'n' && !typing && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      openDrawer();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      const form = event.target.form || event.target.closest?.('.task-form');
+      if (form?.id === 'task-edit' && document.querySelector('[data-task-save]')?.disabled) return;
+      if (form) form.requestSubmit();
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    window.clearTimeout(sseTimer);
+    sse?.close();
+    sse = null;
+  });
+}
+bindShell();
+bindContent(document.querySelector('.content'));
 
 function wireBackdrop(dialog, close) {
   if (!dialog) return;
@@ -1241,22 +1255,58 @@ function showPing(text, href) {
   window.setTimeout(() => box.remove(), 8000);
 }
 
-async function refreshContent() {
+let refreshTimer = 0;
+let refreshBusy = false;
+let refreshQueued = false;
+
+function scheduleRefresh() {
+  window.clearTimeout(refreshTimer);
+  refreshTimer = window.setTimeout(runRefresh, 400);
+}
+
+async function runRefresh() {
+  if (refreshBusy) {
+    refreshQueued = true;
+    return;
+  }
   const path = location.pathname;
   const live = path === '/' || path === '/team' || path === '/calendar' || path === '/manage' || /^\/tasks\/\d+$/.test(path);
   if (!live) return;
   if (document.querySelector('dialog[open]')) return;
+  if (/^\/tasks\/\d+$/.test(path) && taskDirty) return;
   const active = document.activeElement;
   if (active && active.matches?.('input, textarea, select') && active.closest('.content')) return;
-  const response = await fetch(location.href, { headers: { accept: 'text/html' } });
-  if (!response.ok) return;
-  const html = await response.text();
-  const parsed = new DOMParser().parseFromString(html, 'text/html');
-  const next = parsed.querySelector('.content');
-  const current = document.querySelector('.content');
-  if (!next || !current) return;
-  current.replaceWith(document.importNode(next, true));
-  bindPage();
+  const scrollY = window.scrollY;
+  const doneOpen = Boolean(document.querySelector('.done-rows') && !document.querySelector('.done-rows').hasAttribute('hidden'));
+  refreshBusy = true;
+  try {
+    const response = await fetch(location.href, { headers: { accept: 'text/html' } });
+    if (!response.ok) return;
+    if (/^\/tasks\/\d+$/.test(location.pathname) && taskDirty) return;
+    const html = await response.text();
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    const next = parsed.querySelector('.content');
+    const current = document.querySelector('.content');
+    if (!next || !current) return;
+    current.replaceWith(document.importNode(next, true));
+    const rows = document.querySelector('.content .done-rows');
+    if (rows && doneOpen) {
+      rows.removeAttribute('hidden');
+      document.querySelector('.content [data-done-toggle]')?.setAttribute('aria-expanded', 'true');
+    }
+    bindContent(document.querySelector('.content'));
+    window.scrollTo(0, scrollY);
+  } finally {
+    refreshBusy = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      runRefresh();
+    }
+  }
+}
+
+function refreshContent() {
+  scheduleRefresh();
 }
 
 function connectSse() {
@@ -1274,7 +1324,7 @@ function connectSse() {
     let data = {};
     try { data = JSON.parse(event.data || '{}'); } catch { data = {}; }
     showPing(data.summary || 'Board updated', data.taskId ? `/tasks/${data.taskId}` : location.pathname);
-    refreshContent().catch(() => {});
+    scheduleRefresh();
   });
   sse.addEventListener('notify', (event) => {
     let data = {};
@@ -1303,7 +1353,7 @@ if (taskWait) {
     if (!response.ok) return;
     const state = await response.json();
     if (live && live.isConnected) live.textContent = state.live || '';
-    if (wasWaiting && !state.waiting) refreshContent().catch(() => {});
+    if (wasWaiting && !state.waiting) scheduleRefresh();
     wasWaiting = Boolean(state.waiting);
   }, 15000);
 }
