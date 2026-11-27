@@ -254,6 +254,86 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
     closeReview();
   });
   wireBackdrop(reviewDialog, closeReview);
+  root.querySelectorAll('[data-fill-duration]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const form = button.closest('form');
+      const input = form?.querySelector('[name="duration"]');
+      if (!input) return;
+      input.value = button.getAttribute('data-fill-duration') || '';
+      form.querySelectorAll('[data-fill-duration]').forEach((item) => item.classList.toggle('on', item === button));
+    });
+  });
+  root.querySelectorAll('[data-set-date]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const form = button.closest('form');
+      const input = form?.querySelector('[name="due_date"]');
+      if (input) input.value = button.getAttribute('data-set-date') || '';
+      form?.querySelectorAll('[data-set-date]').forEach((item) => item.classList.toggle('on', item === button));
+    });
+  });
+  function openQuick(dialog, setup) {
+    if (!dialog) return;
+    setup();
+    if (!dialog.open) dialog.showModal();
+  }
+  const logDialog = root.querySelector('#log-time-dialog');
+  const logForm = logDialog?.querySelector('[data-log-form]');
+  root.querySelectorAll('[data-log-time]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openQuick(logDialog, () => {
+        logForm.action = `/tasks/${button.dataset.task}/time`;
+        logForm.querySelector('[data-log-back]').value = button.dataset.back || '/';
+        logForm.querySelector('[data-log-title]').textContent = button.dataset.title || '';
+        const duration = logForm.querySelector('[name="duration"]');
+        if (duration) duration.value = '';
+        logForm.querySelector('[name="note"]').value = '';
+        logForm.querySelectorAll('[data-fill-duration]').forEach((item) => item.classList.remove('on'));
+      });
+      logForm.querySelector('[name="duration"]')?.focus();
+    });
+  });
+  const completeDialog = root.querySelector('#complete-dialog');
+  const completeForm = completeDialog?.querySelector('[data-complete-form]');
+  root.querySelectorAll('[data-complete]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openQuick(completeDialog, () => {
+        completeForm.action = `/tasks/${button.dataset.task}/complete`;
+        completeForm.querySelector('[data-complete-back]').value = button.dataset.back || '/';
+        completeForm.querySelector('[data-complete-title]').textContent = button.dataset.title || '';
+        completeForm.querySelector('[data-complete-logged]').textContent = `${button.dataset.logged || '0m'} logged so far`;
+        const duration = completeForm.querySelector('[name="duration"]');
+        if (duration) duration.value = '';
+        completeForm.querySelector('[name="completion_note"]').value = '';
+        completeForm.querySelectorAll('[data-fill-duration]').forEach((item) => item.classList.remove('on'));
+      });
+    });
+  });
+  const pushDialog = root.querySelector('#reschedule-dialog');
+  const pushForm = pushDialog?.querySelector('[data-reschedule-form]');
+  root.querySelectorAll('[data-reschedule]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openQuick(pushDialog, () => {
+        pushForm.action = `/tasks/${button.dataset.task}/reschedule`;
+        pushForm.querySelector('[data-reschedule-back]').value = button.dataset.back || '/';
+        pushForm.querySelector('[data-reschedule-title]').textContent = button.dataset.title || '';
+        pushForm.querySelector('[name="reason"]').value = '';
+        const waiting = button.dataset.waiting || '';
+        const box = pushForm.querySelector('[data-waiting-external]');
+        const input = pushForm.querySelector('[data-waiting-input]');
+        if (box) box.checked = Boolean(waiting);
+        if (input) input.value = waiting;
+      });
+    });
+  });
+  [logDialog, completeDialog, pushDialog].forEach((dialog) => {
+    if (!dialog) return;
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+    });
+    dialog.querySelector('[data-close-quick]')?.addEventListener('click', () => dialog.close());
+    wireBackdrop(dialog, () => dialog.close());
+  });
   reviewForm.addEventListener('submit', (event) => {
     if (!reviewerId.value) {
       event.preventDefault();

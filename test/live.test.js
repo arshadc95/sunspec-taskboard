@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { backdropCloses } from '../public/dialog-close.js';
-import { capRunningTimers, createTask, createUser, deleteTask, openDatabase, unreadMentionCount } from '../src/db.js';
+import { capRunningTimers, createTask, createUser, deleteTask, openDatabase, teamBoard, unreadMentionCount } from '../src/db.js';
+import { buildManage } from '../src/manage.js';
 import { publish } from '../src/events.js';
 import { createApp } from '../src/server.js';
 import { parseDuration, timerStopAt } from '../src/time.js';
@@ -81,6 +82,32 @@ test('old time entries gain the auto-stop columns', () => {
   assert.ok(names.includes('auto_stopped'));
   assert.ok(names.includes('note'));
   assert.ok(names.includes('updated_at'));
+  db.close();
+});
+
+test('old tasks gain a waiting_on column', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-wait-migrate-'));
+  const file = path.join(dir, 'old.sqlite');
+  const raw = new Database(file);
+  raw.exec(`
+    CREATE TABLE tasks (
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      assignee_id INTEGER,
+      status TEXT NOT NULL,
+      priority TEXT,
+      due_date TEXT,
+      created_by INTEGER NOT NULL,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  raw.close();
+  const db = openDatabase(file);
+  const names = db.prepare('PRAGMA table_info(tasks)').all().map((column) => column.name);
+  assert.ok(names.includes('waiting_on'));
   db.close();
 });
 
@@ -443,6 +470,199 @@ test('priority sort matches the list and the csv, and time notes keep start and 
       back: '/',
     });
     assert.equal(blank.status, 302);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
+});
+
+test('the board logs time from a dialog, complete can log time, and overdue dates can be pushed', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-log-'));
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'board.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const form = await page(base, admin.cookies, '/tasks/new');
+    const adminId = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
+    const created = await post(base, admin.cookies, '/tasks', {
+      _csrf: form.csrf,
+      title: 'Late meter',
+      description: '',
+      status: 'todo',
+      priority: '',
+      due_date: '2026-11-20',
+      assignee_id: String(adminId),
+      project_id: '',
+      new_project: '',
+    });
+    const taskId = Number(created.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    const board = await page(base, admin.cookies, '/');
+    assert.match(board.text, /\+ Log/);
+    assert.match(board.text, /id="log-time-dialog"/);
+    assert.match(board.text, /id="complete-dialog"/);
+    assert.match(board.text, /id="reschedule-dialog"/);
+    assert.match(board.text, /data-fill-duration="15m"/);
+    assert.match(board.text, />Push</);
+    assert.doesNotMatch(board.text, /timer\/start/);
+    const detail = await page(base, admin.cookies, `/tasks/${taskId}`);
+    assert.match(detail.text, /Start stopwatch/);
+    assert.match(detail.text, /data-fill-duration="4h"/);
+    const pushed = await post(base, admin.cookies, `/tasks/${taskId}/reschedule`, {
+      _csrf: detail.csrf,
+      due_date: '2026-11-30',
+      reason: 'Waiting on supplier',
+      back: `/tasks/${taskId}`,
+    });
+    assert.equal(pushed.status, 302);
+    assert.equal(db.prepare('SELECT due_date FROM tasks WHERE id = ?').get(taskId).due_date, '2026-11-30');
+    const activity = db.prepare('SELECT detail FROM activity WHERE task_id = ? ORDER BY id DESC').get(taskId).detail;
+    assert.match(activity, /Rescheduled due date from 20 Nov 2026 to 30 Nov 2026: Waiting on supplier/);
+    const finished = await post(base, admin.cookies, `/tasks/${taskId}/complete`, {
+      _csrf: detail.csrf,
+      duration: '30m',
+      date: '2026-11-27',
+      completion_note: 'Meter commissioned',
+      back: `/tasks/${taskId}`,
+    });
+    assert.equal(finished.status, 302);
+    assert.equal(db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId).status, 'done');
+    assert.equal(db.prepare('SELECT completion_note FROM tasks WHERE id = ?').get(taskId).completion_note, 'Meter commissioned');
+    const entry = db.prepare('SELECT started_at, ended_at, note FROM time_entries WHERE task_id = ?').get(taskId);
+    assert.equal(Date.parse(entry.ended_at) - Date.parse(entry.started_at), 30 * 60 * 1000);
+    assert.equal(entry.note, 'Meter commissioned');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
+});
+
+test('a task waiting on someone else is left out of overdue counts and on-time penalties', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-wait-'));
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'board.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const adminId = db.prepare("SELECT id FROM users WHERE email = 'arshad@example.com'").get().id;
+    const form = await page(base, admin.cookies, '/tasks/new');
+    const created = await post(base, admin.cookies, '/tasks', {
+      _csrf: form.csrf,
+      title: 'Held meter',
+      description: '',
+      status: 'todo',
+      priority: '',
+      due_date: '2026-11-20',
+      assignee_id: String(adminId),
+      project_id: '',
+      new_project: '',
+    });
+    const taskId = Number(created.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    const late = await page(base, admin.cookies, '/');
+    assert.match(late.text, /1 overdue/);
+    assert.match(late.text, /task-row overdue/);
+    assert.match(late.text, /Waiting on external \(not our delay\)/);
+    assert.match(late.text, /id="reschedule-dialog"/);
+    const filtered = await page(base, admin.cookies, '/?overdue=1');
+    assert.match(filtered.text, /Held meter/);
+    assert.equal(teamBoard(db).find((row) => row.id === adminId).overdue, 1);
+    assert.equal(buildManage(db).kpis.overdue, 1);
+
+    const detail = await page(base, admin.cookies, `/tasks/${taskId}`);
+    assert.match(detail.text, /Waiting on external \(not our delay\)/);
+    const held = await post(base, admin.cookies, `/tasks/${taskId}/reschedule`, {
+      _csrf: detail.csrf,
+      due_date: '2026-11-21',
+      reason: 'Site priority shift',
+      waiting_present: '1',
+      waiting_external: '1',
+      waiting_on: 'Waiting on supplier',
+      back: `/tasks/${taskId}`,
+    });
+    assert.equal(held.status, 302);
+    assert.equal(db.prepare('SELECT due_date, waiting_on FROM tasks WHERE id = ?').get(taskId).waiting_on, 'Waiting on supplier');
+    assert.equal(db.prepare('SELECT due_date FROM tasks WHERE id = ?').get(taskId).due_date, '2026-11-21');
+    const notes = db.prepare('SELECT detail FROM activity WHERE task_id = ? ORDER BY id').all(taskId).map((row) => row.detail);
+    assert.ok(notes.some((line) => /Rescheduled due date from 20 Nov 2026 to 21 Nov 2026: Site priority shift/.test(line)));
+    assert.ok(notes.some((line) => line === 'Waiting on external: Waiting on supplier'));
+
+    const calm = await page(base, admin.cookies, '/');
+    assert.match(calm.text, /0 overdue/);
+    assert.match(calm.text, /Waiting: Waiting on supplier/);
+    assert.doesNotMatch(calm.text, /task-row overdue/);
+    assert.match(calm.text, /task-row waiting/);
+    const hidden = await page(base, admin.cookies, '/?overdue=1');
+    assert.doesNotMatch(hidden.text, /Held meter/);
+    assert.equal(teamBoard(db).find((row) => row.id === adminId).overdue, 0);
+    assert.equal(buildManage(db).kpis.overdue, 0);
+    assert.equal(buildManage(db).people.find((row) => row.id === adminId).overdue, 0);
+    const csv = await (await fetch(`${base}/export.csv`, { headers: { cookie: admin.cookies.header() } })).text();
+    assert.match(csv.split('\n')[0], /Waiting On/);
+    assert.match(csv, /Waiting on supplier/);
+
+    const cleared = await post(base, admin.cookies, `/tasks/${taskId}/waiting`, {
+      _csrf: detail.csrf,
+      clear: '1',
+      back: '/',
+    });
+    assert.equal(cleared.status, 302);
+    assert.equal(db.prepare('SELECT waiting_on FROM tasks WHERE id = ?').get(taskId).waiting_on, null);
+    assert.match((await page(base, admin.cookies, '/')).text, /1 overdue/);
+    assert.ok(db.prepare('SELECT detail FROM activity WHERE task_id = ? ORDER BY id DESC').get(taskId).detail.includes('Cleared the external wait'));
+
+    await post(base, admin.cookies, `/tasks/${taskId}/waiting`, {
+      _csrf: detail.csrf,
+      waiting_present: '1',
+      waiting_external: '1',
+      waiting_on: 'Waiting on supplier',
+      back: '/',
+    });
+    assert.equal(teamBoard(db).find((row) => row.id === adminId).overdue, 0);
+    const doneLate = await post(base, admin.cookies, `/tasks/${taskId}/complete`, {
+      _csrf: detail.csrf,
+      back: '/',
+    });
+    assert.equal(doneLate.status, 302);
+    const onTimeForm = await page(base, admin.cookies, '/tasks/new');
+    const onTime = await post(base, admin.cookies, '/tasks', {
+      _csrf: onTimeForm.csrf,
+      title: 'Same day fix',
+      description: '',
+      status: 'todo',
+      priority: '',
+      due_date: '2026-11-27',
+      assignee_id: String(adminId),
+      project_id: '',
+      new_project: '',
+    });
+    const onTimeId = Number(onTime.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    const onTimePage = await page(base, admin.cookies, `/tasks/${onTimeId}`);
+    await post(base, admin.cookies, `/tasks/${onTimeId}/complete`, {
+      _csrf: onTimePage.csrf,
+      back: '/',
+    });
+    assert.equal(teamBoard(db).find((row) => row.id === adminId).onTimePercent, 100);
+    assert.equal(buildManage(db).people.find((row) => row.id === adminId).onTimePct, 100);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();

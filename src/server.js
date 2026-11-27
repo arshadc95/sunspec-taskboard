@@ -95,7 +95,7 @@ import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
 import { boardChanged, closeAll, subscribe } from './events.js';
-import { durationFromParts, entrySeconds, entrySpan, entryStart, formatCsvTimeEntry, formatDue, formatDuration, formatDurationClock, isValidDate, parseDuration, todayDate } from './time.js';
+import { countsAsOverdue, durationFromParts, entrySeconds, entrySpan, entryStart, formatCsvTimeEntry, formatDue, formatDuration, formatDurationClock, isValidDate, parseDuration, todayDate } from './time.js';
 import { buildManage } from './manage.js';
 import { fileExpiry, grokConnected, grokFileExpiry, isPdf, mountBot, pdfFilename, postGrokWebhook, rateLimitMessage, recentContext, webhookFiles } from './grok.js';
 import {
@@ -217,7 +217,15 @@ function parseTask(body, users) {
     dueDate: due || null,
     assigneeId: assigneeIds[0] || null,
     assigneeIds,
+    waitingOn: readWaiting(body),
   };
+}
+
+function readWaiting(body) {
+  if (body.waiting_present !== '1' && body.waiting_external !== '1' && body.clear !== '1') return undefined;
+  if (body.clear === '1' || body.waiting_external !== '1') return null;
+  const text = String(body.waiting_on || '').trim().slice(0, 280);
+  return text || 'Waiting on external';
 }
 
 function parseIdentity(body) {
@@ -487,7 +495,7 @@ export function createApp(config) {
   app.get('/export.csv', requireUser, (req, res) => {
     const filters = readFilters(req);
     const tasks = withTime(db, listTasks(db, filters));
-    const header = ['id', 'title', 'description', 'project', 'assignee', 'status', 'priority', 'due', 'created by', 'comments', 'time', 'Time Entries', 'Completion Note', 'created', 'updated', 'overdue'];
+    const header = ['id', 'title', 'description', 'project', 'assignee', 'status', 'priority', 'due', 'created by', 'comments', 'time', 'Time Entries', 'Completion Note', 'Waiting On', 'created', 'updated', 'overdue'];
     const lines = [header.join(',')];
     const entryText = csvTimeEntries(db, tasks);
     for (const task of tasks) {
@@ -505,6 +513,7 @@ export function createApp(config) {
         formatDuration(task.time_seconds || 0),
         entryText.get(task.id) || '',
         task.completion_note || '',
+        task.waiting_on || '',
         task.created_at,
         task.updated_at,
         isOverdueTask(task, filters.today) ? 'yes' : 'no',
@@ -684,7 +693,7 @@ export function createApp(config) {
     const note = String(req.body.note || '').trim().slice(0, 280);
     addManualEntry(db, { taskId: task.id, userId, startedAt: span.startedAt, endedAt: span.endedAt, seconds: span.seconds, note });
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: `Logged ${formatDurationClock(span.seconds)}` });
-    res.redirect(`/tasks/${task.id}?msg=saved`);
+    res.redirect(safeNext(String(req.body.back || `/tasks/${task.id}?msg=saved`)));
   });
 
   app.post('/tasks/:id/time/:entryId', requireUser, (req, res) => {
@@ -770,6 +779,19 @@ export function createApp(config) {
         completionNote: String(req.body.completion_note || ''),
       });
       logTaskChanges(db, req.user, task, updated);
+      const span = readSpan(req.body);
+      if (span) {
+        const note = String(req.body.completion_note || '').trim().slice(0, 280);
+        addManualEntry(db, {
+          taskId: task.id,
+          userId: req.user.id,
+          startedAt: span.startedAt,
+          endedAt: span.endedAt,
+          seconds: span.seconds,
+          note,
+        });
+        addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: `Logged ${formatDurationClock(span.seconds)}` });
+      }
       stopTimersOnTask(db, task.id);
       addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'status', detail: 'Marked the task done' });
       noteTask(req.user, 'completed', task);
@@ -777,6 +799,59 @@ export function createApp(config) {
     const back = safeNext(String(req.body.back || '/'));
     const join = back.includes('?') ? '&' : '?';
     res.redirect(`${back}${join}toast=done&undo=${task.id}&was=${encodeURIComponent(previous)}`);
+  });
+
+  app.post('/tasks/:id/reschedule', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canEditTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const due = String(req.body.due_date || '').trim();
+    const back = safeNext(String(req.body.back || `/tasks/${task.id}`));
+    if (!isValidDate(due) || task.status === 'done') {
+      const join = back.includes('?') ? '&' : '?';
+      return res.redirect(`${back}${join}msg=invalid`);
+    }
+    const reason = String(req.body.reason || '').trim().slice(0, 280);
+    const waitingOn = readWaiting(req.body);
+    const updated = updateTask(db, task.id, {
+      title: task.title,
+      description: task.description,
+      assigneeId: task.assignee_id,
+      status: task.status,
+      priority: task.priority,
+      dueDate: due,
+      projectId: task.project_id,
+      ...(waitingOn !== undefined ? { waitingOn } : {}),
+    });
+    logTaskChanges(db, req.user, task, updated);
+    const detail = `Rescheduled due date from ${formatDue(task.due_date)} to ${formatDue(due)}${reason ? `: ${reason}` : ''}`;
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'due', detail });
+    res.redirect(back);
+  });
+
+  app.post('/tasks/:id/waiting', requireUser, (req, res) => {
+    if (!csrfOk(req)) return res.status(403).type('text').send('Form expired. Reload the page and try again.');
+    const id = numericId(req.params.id);
+    const task = id ? getTask(db, id) : null;
+    if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
+    if (!canEditTask(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
+    const back = safeNext(String(req.body.back || `/tasks/${task.id}`));
+    if (task.status === 'done') return res.redirect(back);
+    const waitingOn = req.body.clear === '1' ? null : readWaiting(req.body);
+    const updated = updateTask(db, task.id, {
+      title: task.title,
+      description: task.description,
+      assigneeId: task.assignee_id,
+      status: task.status,
+      priority: task.priority,
+      dueDate: task.due_date,
+      projectId: task.project_id,
+      waitingOn,
+    });
+    logTaskChanges(db, req.user, task, updated);
+    res.redirect(back);
   });
 
   app.post('/tasks/:id/reopen', requireUser, (req, res) => {
@@ -1452,6 +1527,10 @@ function logTaskChanges(db, actor, before, after) {
   if ((before.project_id || null) !== (after.project_id || null)) {
     changes.push(['project', `Project: ${before.project_name || '—'} → ${after.project_name || '—'}`]);
   }
+  if ((before.waiting_on || '') !== (after.waiting_on || '')) {
+    const next = String(after.waiting_on || '').trim();
+    changes.push(['waiting', next ? `Waiting on external: ${next}` : 'Cleared the external wait']);
+  }
   for (const [action, detail] of changes) {
     addActivity(db, { taskId: after.id, actorId: actor.id, action, detail });
   }
@@ -1464,7 +1543,7 @@ function csvCell(value) {
 }
 
 function isOverdueTask(task, today) {
-  return Boolean(task.due_date) && task.status !== 'done' && task.due_date < today;
+  return countsAsOverdue(task, today);
 }
 
 export function start() {

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { COLOR_NAMES, PALETTE, colorClass, colorForUser } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { clockInJohannesburg, dateInJohannesburg, entrySeconds, formatDateTime, formatDayLabel, formatDue, formatDuration, formatEntryWhen, isOverdue, shiftDate, todayDate } from './time.js';
+import { clockInJohannesburg, countsAsOverdue, dateInJohannesburg, entrySeconds, externalWait, formatDateTime, formatDayLabel, formatDue, formatDuration, formatEntryWhen, isOverdue, shiftDate, todayDate } from './time.js';
 
 const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
@@ -453,13 +453,15 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
               <div class="chips">${chips.map(([, label, date]) => `<button type="button" class="chip${due === date ? ' on' : ''}" data-due="${esc(date)}" ${off}>${label}</button>`).join('')}</div>
               <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
             </div>
+            ${waitingFields(value, off)}
           </div>
           ${metaHtml}
         </section>
       </aside>`;
     const linked = canEdit ? ' form="task-edit"' : '';
     const details = body.match(/<section class="form-card task-details">[\s\S]*?<\/section>/)?.[0] || '';
-    const aside = (body.match(/<aside class="task-side">[\s\S]*<\/aside>/)?.[0] || '').replace(/<(input|select|textarea)\b/g, `<$1${linked}`);
+    let aside = (body.match(/<aside class="task-side">[\s\S]*<\/aside>/)?.[0] || '').replace(/<(input|select|textarea)\b/g, `<$1${linked}`);
+    if (value.id && externalWait(value) && canEdit) aside = aside.replace('</aside>', `${clearWaitingForm(value, csrf, `/tasks/${value.id}`)}</aside>`);
     const head = `<input type="hidden" name="_csrf" value="${esc(csrf)}">${from ? `<input type="hidden" name="from" value="${esc(from)}">` : ''}`;
     if (!canEdit) {
       return `<div class="task-col"><div class="task-form is-readonly">${details}</div><!--REST--></div><div class="task-col">${aside}<!--RAIL--></div>`;
@@ -490,17 +492,47 @@ function timerMark(task, user) {
   return `<span class="dot${mine ? ' mine' : ''}" title="Timer running: ${esc(names)}">●</span> `;
 }
 
-function rowTimer(task, user, csrf, back) {
-  if (!canRunTimer(task, user)) return '';
-  const mine = (task.running || []).find((row) => row.user_id === user.id);
-  const action = mine ? 'stop' : 'start';
-  const label = mine ? 'Stop' : 'Start';
-  return `<form class="row-timer" method="post" action="/tasks/${task.id}/timer/${action}">
+function durationChips(labels) {
+  return `<div class="chips">${labels.map(([value, label]) => `<button type="button" class="chip" data-fill-duration="${esc(value)}">${esc(label)}</button>`).join('')}</div>`;
+}
+
+function logButton(task, back) {
+  if (task.status === 'done') return '';
+  return `<button type="button" class="btn btn-tiny" data-log-time data-task="${task.id}" data-title="${esc(task.title)}" data-back="${esc(back)}">+ Log</button>`;
+}
+
+function rescheduleButton(task, user, today, back) {
+  if (!isOverdue(task.due_date, task.status, today) || !canQuickStatus(user, task)) return '';
+  return `<button type="button" class="btn btn-tiny" data-reschedule data-task="${task.id}" data-title="${esc(task.title)}" data-waiting="${esc(externalWait(task))}" data-back="${esc(back)}">Push</button>`;
+}
+
+function waitingFields(task, off) {
+  const reason = externalWait(task);
+  return `<input type="hidden" name="waiting_present" value="1">
+    <label class="check-line"><input type="checkbox" name="waiting_external" value="1"${reason ? ' checked' : ''} ${off}><span>Waiting on external (not our delay)</span></label>
+    <input name="waiting_on" maxlength="280" value="${esc(reason)}" placeholder="Waiting on supplier / client" aria-label="Waiting on" ${off}>
+    ${reason ? `<p class="waiting-badge">Waiting: ${esc(reason)}</p>` : ''}`;
+}
+
+function clearWaitingForm(task, csrf, back) {
+  return `<form class="wait-clear" method="post" action="/tasks/${task.id}/waiting">
     <input type="hidden" name="_csrf" value="${esc(csrf)}">
-    <input type="hidden" name="return" value="board">
     <input type="hidden" name="back" value="${esc(back)}">
-    <button class="btn btn-tiny" type="submit">${label}</button>
+    <input type="hidden" name="clear" value="1">
+    <button class="btn btn-tiny" type="submit">Clear</button>
   </form>`;
+}
+
+function waitingMark(task, user, csrf, back) {
+  const reason = externalWait(task);
+  if (!reason || task.status === 'done') return '';
+  const clear = canQuickStatus(user, task) ? clearWaitingForm(task, csrf, back) : '';
+  return `<span class="waiting-badge">Waiting: ${esc(reason)}</span>${clear}`;
+}
+
+function dueTone(task, today) {
+  if (externalWait(task)) return ' waiting';
+  return countsAsOverdue(task, today) ? ' overdue' : '';
 }
 
 function timeBits(task, user) {
@@ -573,21 +605,71 @@ function reviewDialog(csrf) {
   </dialog>`;
 }
 
-function completeControl(task, user, csrf, back, prominent = false) {
+function completeControl(task, user, back, prominent = false, logged = '0m') {
   if (task.status === 'done' || !canQuickStatus(user, task)) return '';
-  const note = prominent
-    ? '<input name="completion_note" maxlength="280" placeholder="Completion note" aria-label="Completion note">'
-    : '';
-  return `<form class="row-complete${prominent ? ' complete-note' : ''}" method="post" action="/tasks/${task.id}/complete">
-    <input type="hidden" name="_csrf" value="${esc(csrf)}">
-    <input type="hidden" name="back" value="${esc(back)}">
-    ${note}
-    <button class="btn ${prominent ? 'btn-primary' : 'btn-tiny complete'}" type="submit" title="Mark done">${prominent ? '✓ Complete' : '✓'}</button>
-  </form>`;
+  return `<button type="button" class="btn ${prominent ? 'btn-primary' : 'btn-tiny complete'}" data-complete data-task="${task.id}" data-title="${esc(task.title)}" data-logged="${esc(logged)}" data-back="${esc(back)}" title="Mark done">${prominent ? '✓ Complete' : '✓'}</button>`;
 }
 
-function rowStatusActions(task, user, csrf, back, prominent = false) {
-  return `${reviewControl(task, user, back)}${completeControl(task, user, csrf, back, prominent)}`;
+function rowStatusActions(task, user, back, prominent = false, logged = '0m') {
+  return `${reviewControl(task, user, back)}${completeControl(task, user, back, prominent, logged)}`;
+}
+
+function quickDialogs(csrf, today) {
+  const day = today || todayDate();
+  const chips = [['15m', '15m'], ['30m', '30m'], ['1h', '1h'], ['2h', '2h'], ['4h', '4h']];
+  return `<dialog id="log-time-dialog" class="drawer quick-dialog">
+    <div class="drawer-bar"><h2>Log time</h2><button type="button" class="drawer-close" data-close-quick aria-label="Close">×</button></div>
+    <form class="task-form" method="post" action="/tasks/0/time" data-log-form>
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <input type="hidden" name="back" value="/" data-log-back>
+      <p class="dialog-title" data-log-title></p>
+      ${durationChips(chips)}
+      <div class="time-row">
+        <input name="duration" placeholder="or 1h 30m" aria-label="Duration">
+        <input type="time" name="start" aria-label="Start">
+        <input type="time" name="end" aria-label="End">
+      </div>
+      <div class="time-row">
+        <input type="date" name="date" required value="${esc(day)}" aria-label="Date">
+        <input name="note" maxlength="280" placeholder="What was done / outstanding" aria-label="Work note">
+      </div>
+      <div class="form-footer"><button class="btn btn-primary" type="submit">Log time</button></div>
+    </form>
+  </dialog>
+  <dialog id="complete-dialog" class="drawer quick-dialog">
+    <div class="drawer-bar"><h2>Complete</h2><button type="button" class="drawer-close" data-close-quick aria-label="Close">×</button></div>
+    <form class="task-form" method="post" action="/tasks/0/complete" data-complete-form>
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <input type="hidden" name="back" value="/" data-complete-back>
+      <input type="hidden" name="date" value="${esc(day)}">
+      <p class="dialog-title" data-complete-title></p>
+      <p class="hint" data-complete-logged></p>
+      ${durationChips([['', 'Skip'], ...chips])}
+      <input name="duration" placeholder="or 1h 30m" aria-label="Duration">
+      <input name="completion_note" maxlength="280" placeholder="What was completed / still outstanding" aria-label="Completion note">
+      <div class="form-footer"><button class="btn btn-primary" type="submit">Complete</button></div>
+    </form>
+  </dialog>
+  <dialog id="reschedule-dialog" class="drawer quick-dialog">
+    <div class="drawer-bar"><h2>Push due date</h2><button type="button" class="drawer-close" data-close-quick aria-label="Close">×</button></div>
+    <form class="task-form" method="post" action="/tasks/0/reschedule" data-reschedule-form>
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <input type="hidden" name="back" value="/" data-reschedule-back>
+      <p class="dialog-title" data-reschedule-title></p>
+      <div class="chips">
+        <button type="button" class="chip" data-set-date="${esc(day)}">Today</button>
+        <button type="button" class="chip" data-set-date="${esc(shiftDate(day, 1))}">Tomorrow</button>
+        <button type="button" class="chip" data-set-date="${esc(shiftDate(day, 3))}">+3 days</button>
+        <button type="button" class="chip" data-set-date="${esc(shiftDate(day, 7))}">Next week</button>
+      </div>
+      <input type="date" name="due_date" required value="${esc(day)}" aria-label="Due date">
+      <input name="reason" maxlength="280" placeholder="Waiting on supplier" aria-label="Reason">
+      <input type="hidden" name="waiting_present" value="1">
+      <label class="check-line"><input type="checkbox" name="waiting_external" value="1" data-waiting-external><span>Waiting on external (not our delay)</span></label>
+      <input name="waiting_on" maxlength="280" placeholder="Waiting on supplier / client" aria-label="Waiting on" data-waiting-input>
+      <div class="form-footer"><button class="btn btn-primary" type="submit">Push</button></div>
+    </form>
+  </dialog>`;
 }
 
 function mentionBits(task) {
@@ -599,37 +681,35 @@ function mentionBits(task) {
 }
 
 function taskCard(task, today, user, csrf, back) {
-  const overdue = isOverdue(task.due_date, task.status, today);
   const mention = mentionBits(task);
-  return `<article class="task-card${overdue ? ' overdue' : ''}${task.justAdded ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
+  return `<article class="task-card${dueTone(task, today)}${task.justAdded ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
     <div class="card-top">${mention.mark}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}${mention.snip}</div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${task.assignees?.length ? assigneeCell(task) : 'Unassigned'}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
-      <span class="due">${esc(formatDue(task.due_date))}</span>
-      <span class="time">${timeBits(task, user)}${rowTimer(task, user, csrf, back)}</span>
+      <span class="due">${esc(formatDue(task.due_date))}${waitingMark(task, user, csrf, back)}${rescheduleButton(task, user, today, back)}</span>
+      <span class="time">${timeBits(task, user)}${logButton(task, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
-    <div class="card-actions">${rowStatusActions(task, user, csrf, back)}</div>
+    <div class="card-actions">${rowStatusActions(task, user, back, false, formatDuration(task.time_seconds || 0))}</div>
   </article>`;
 }
 
 function taskRow(task, today, user, csrf, back, highlight) {
-  const overdue = isOverdue(task.due_date, task.status, today);
   const added = String(highlight || '') === String(task.id);
   const mention = mentionBits(task);
-  return `<tr class="task-row${overdue ? ' overdue' : ''}${added ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
+  return `<tr class="task-row${dueTone(task, today)}${added ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
     <td>${mention.mark}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}${mention.snip}</td>
     <td>${esc(task.project_name || '—')}</td>
     <td>${assigneeCell(task)}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
-    <td class="due">${esc(formatDue(task.due_date))}</td>
-    <td class="time">${timeBits(task, user)}${rowTimer(task, user, csrf, back)}</td>
+    <td class="due">${esc(formatDue(task.due_date))}${waitingMark(task, user, csrf, back)}${rescheduleButton(task, user, today, back)}</td>
+    <td class="time">${timeBits(task, user)}${logButton(task, back)}</td>
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
-    <td class="row-actions">${rowStatusActions(task, user, csrf, back)}</td>
+    <td class="row-actions">${rowStatusActions(task, user, back, false, formatDuration(task.time_seconds || 0))}</td>
   </tr>`;
 }
 
@@ -718,7 +798,8 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
     </dialog>
     <a class="fab" href="/tasks/new" data-open-drawer aria-label="New task">+</a>
     ${projectScript(projects)}
-    ${reviewDialog(csrf)}`;
+    ${reviewDialog(csrf)}
+    ${quickDialogs(csrf, today)}`;
 
   return layout({
     title: 'Tasks · Sunspec',
@@ -744,8 +825,8 @@ function renderTimer(task, csrf, timer, user, users, today) {
     ? ''
     : mine
     ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
-      <form class="time-row" method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><input name="note" maxlength="280" placeholder="What was done" aria-label="Work note"><button class="btn btn-danger" type="submit">Stop</button></form>`
-    : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
+      <form class="time-row" method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><input name="note" maxlength="280" placeholder="What was done" aria-label="Work note"><button class="btn btn-tiny" type="submit">Stop</button></form>`
+    : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-tiny" type="submit">Start stopwatch</button></form>
       ${timer.other ? `<p class="hint">Starting stops your timer on <a href="/tasks/${timer.other.task_id}">${esc(timer.other.task_title)}</a>.</p>` : ''}`;
   const people = (users || []).filter((person) => person.active !== 0 && !person.is_bot);
   const logFor = user.role === 'superuser'
@@ -779,12 +860,12 @@ function renderTimer(task, csrf, timer, user, users, today) {
   return `<section class="panel pad task-time">
     <h2>Time</h2>
     ${waiting ? `<p class="day-flag">This timer was stopped automatically. Adjust it below.</p>` : ''}
-    ${controls}
     <p class="time-total">Total <strong>${esc(formatDuration(summary.total))}</strong></p>
     ${rows ? `<ul class="time-log">${rows}</ul>` : '<p class="hint">No time logged yet.</p>'}
     <form class="time-add" method="post" action="/tasks/${task.id}/time">
       <input type="hidden" name="_csrf" value="${esc(csrf)}">
       ${logFor}
+      ${durationChips([['15m', '15m'], ['30m', '30m'], ['1h', '1h'], ['2h', '2h'], ['4h', '4h']])}
       <div class="time-row">
         <input type="date" name="date" required value="${esc(today || '')}" aria-label="Date">
         <input type="time" name="start" aria-label="Start">
@@ -796,6 +877,7 @@ function renderTimer(task, csrf, timer, user, users, today) {
         <button class="btn" type="submit">Log time</button>
       </div>
     </form>
+    ${controls ? `<p class="quiet-timer">${controls}</p>` : ''}
   </section>`;
 }
 
@@ -819,7 +901,8 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
   const saveButtons = editable
     ? `${isNew ? '<button class="btn btn-line" type="submit" form="task-edit" name="again" value="1" data-task-save disabled>Save & add another</button>' : ''}<button class="btn btn-line" type="submit" form="task-edit" data-task-save disabled>Save</button>`
     : '';
-  const pageActions = `<div class="title-actions">${!isNew ? `${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? reviewControl(task, user, `/tasks/${task.id}`) : ''}` : ''}${saveButtons}${!isNew && canComplete ? completeControl(task, user, csrf, `/tasks/${task.id}`, true) : ''}${!isNew && task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`;
+  const logged = formatDuration(timer?.summary?.total || 0);
+  const pageActions = `<div class="title-actions">${!isNew ? `${removeControl(task, user, csrf, `/tasks/${task.id}`, true)}${canComplete ? reviewControl(task, user, `/tasks/${task.id}`) : ''}${isOverdue(task.due_date, task.status, today) ? rescheduleButton(task, user, today, `/tasks/${task.id}`) : ''}` : ''}${saveButtons}${!isNew && canComplete ? completeControl(task, user, `/tasks/${task.id}`, true, logged) : ''}${!isNew && task.status === 'done' ? kudosButton({ csrf, type: 'task', id: task.id, count: taskKudos?.counts.get(task.id) || 0, mine: taskKudos?.mine.has(task.id), back: `/tasks/${task.id}` }) : ''}</div>`;
   const commentBlock = isNew
     ? ''
     : `<section class="panel pad">
@@ -898,7 +981,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
         .replace('<!--RAIL-->', renderTimer(task, csrf, timer, user, users, today))}
       </div>
       ${projectScript(projects)}
-      ${isNew ? '' : reviewDialog(csrf)}`,
+      ${isNew ? '' : `${reviewDialog(csrf)}${quickDialogs(csrf, today)}`}`,
   });
 }
 
@@ -1117,9 +1200,10 @@ function weekCells(anchor) {
 }
 
 function chip(task, today) {
-  const overdue = isOverdue(task.due_date, task.status, today);
+  const overdue = countsAsOverdue(task, today);
   const done = task.status === 'done';
-  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${done ? ' done' : ''}" href="/tasks/${task.id}">${assigneeMarks(task)}${esc(task.title)}</a>`;
+  const waiting = externalWait(task) && !done ? ' waiting' : '';
+  return `<a class="chip pri-${esc(task.priority || 'none')}${overdue ? ' late' : ''}${waiting}${done ? ' done' : ''}" href="/tasks/${task.id}"${waiting ? ` title="Waiting: ${esc(externalWait(task))}"` : ''}>${assigneeMarks(task)}${esc(task.title)}</a>`;
 }
 
 export function renderCalendar({ user, csrf, msg, tasks, filters, users, projects, today, view, year, month, anchor }) {

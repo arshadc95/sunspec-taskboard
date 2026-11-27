@@ -1,5 +1,5 @@
 import { colorForUser } from './colors.js';
-import { dateInJohannesburg, shiftDate, todayDate } from './time.js';
+import { countsAsOverdue, countsForOnTime, dateInJohannesburg, shiftDate, todayDate } from './time.js';
 import { coachTips } from './coach.js';
 
 function overlapSeconds(started, ended, fromMs, toMs) {
@@ -98,7 +98,7 @@ export function taskStatusAt(task, rows, endMs) {
 }
 
 function onTimeRate(tasks) {
-  const withDue = tasks.filter((task) => task.due_date);
+  const withDue = tasks.filter((task) => countsForOnTime(task));
   if (!withDue.length) return null;
   const ok = withDue.filter((task) => dateInJohannesburg(task.completed_at) <= task.due_date).length;
   return Math.round((ok / withDue.length) * 100);
@@ -108,7 +108,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
   const today = todayDate(now);
   const nowMs = now.getTime();
   const tasks = db.prepare(`
-    SELECT t.id, t.title, t.status, t.due_date, t.project_id, t.created_at, t.completed_at, t.updated_at, t.deleted_at,
+    SELECT t.id, t.title, t.status, t.due_date, t.waiting_on, t.project_id, t.created_at, t.completed_at, t.updated_at, t.deleted_at,
            p.name AS project_name
     FROM tasks t
     LEFT JOIN projects p ON p.id = t.project_id
@@ -158,7 +158,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
     const mine = live.filter((task) => (assignees.get(task.id) || []).includes(person.id));
     const open = mine.filter((task) => task.status !== 'done');
     const done = mine.filter((task) => task.status === 'done' && task.completed_at && Date.parse(task.completed_at) >= periodStart && Date.parse(task.completed_at) < periodEnd);
-    const withDue = done.filter((task) => task.due_date);
+    const withDue = done.filter((task) => countsForOnTime(task));
     const onTime = withDue.filter((task) => dateInJohannesburg(task.completed_at) <= task.due_date);
     const cycles = done.map((task) => (Date.parse(task.completed_at) - Date.parse(task.created_at)) / 86400000).filter((value) => value >= 0);
     return {
@@ -166,7 +166,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
       name: person.name,
       color: person.color,
       assigned: open.length,
-      overdue: open.filter((task) => task.due_date && task.due_date < today).length,
+      overdue: open.filter((task) => countsAsOverdue(task, today)).length,
       done: done.length,
       onTimePct: withDue.length ? Math.round((onTime.length / withDue.length) * 100) : null,
       avgDays: round1(mean(cycles)),
@@ -177,7 +177,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
   const sortedPeople = [...personStats].sort((a, b) => b.assigned - a.assigned || a.name.localeCompare(b.name));
 
   const openNow = live.filter((task) => task.status !== 'done');
-  const overdueNow = openNow.filter((task) => task.due_date && task.due_date < today);
+  const overdueNow = openNow.filter((task) => countsAsOverdue(task, today));
   const doneIn = (from, to) => live.filter((task) => task.status === 'done' && task.completed_at && Date.parse(task.completed_at) >= from && Date.parse(task.completed_at) < to);
   const donePeriod = doneIn(periodStart, periodEnd);
   const donePrev = doneIn(prevStart, prevEnd);
@@ -195,7 +195,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
     const to = periodStart + (spanMs * (i + 1)) / 8;
     const sample = openAt(to);
     sparkOpen.push(sample.length);
-    sparkOver.push(sample.filter((task) => task.due_date && task.due_date < todayDate(new Date(to))).length);
+    sparkOver.push(sample.filter((task) => countsAsOverdue(task, todayDate(new Date(to)))).length);
     const finished = doneIn(from, to);
     sparkDone.push(finished.length);
     sparkCycle.push(finished.length ? round1(mean(finished.map((task) => (Date.parse(task.completed_at) - Date.parse(task.created_at)) / 86400000))) : null);
@@ -316,7 +316,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
     const open = mine.filter((task) => task.status !== 'done');
     const done = mine.filter((task) => task.status === 'done' && task.completed_at && Date.parse(task.completed_at) >= periodStart && Date.parse(task.completed_at) < periodEnd);
     const seconds = entries.filter((row) => row.project_id === project.id).reduce((sum, row) => sum + overlapSeconds(row.started_at, row.ended_at, periodStart, nowMs), 0);
-    return { name: project.name, open: open.length, overdue: open.filter((task) => task.due_date && task.due_date < today).length, done: done.length, seconds };
+    return { name: project.name, open: open.length, overdue: open.filter((task) => countsAsOverdue(task, today)).length, done: done.length, seconds };
   }).filter((row) => row.open || row.overdue || row.done || row.seconds);
 
   const reviewStuck = live.filter((task) => task.status === 'review').filter((task) => {
@@ -340,7 +340,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
       name: person.name,
       role: person.role,
       open: mine.length,
-      overdue: mine.filter((task) => task.due_date && task.due_date < asOf).length,
+      overdue: mine.filter((task) => countsAsOverdue(task, asOf)).length,
     };
   });
   const soonEnd = shiftDate(asOf, 3);
@@ -384,7 +384,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
       label: span.label,
       created: live.filter((task) => Date.parse(task.created_at) >= span.start && Date.parse(task.created_at) < span.end).length,
       done: finished.length,
-      overdue: live.filter((task) => Date.parse(task.created_at) < span.end && (!task.completed_at || Date.parse(task.completed_at) >= span.end) && task.due_date && task.due_date < asOf).length,
+      overdue: live.filter((task) => Date.parse(task.created_at) < span.end && (!task.completed_at || Date.parse(task.completed_at) >= span.end) && countsAsOverdue(task, asOf)).length,
       avg: round1(mean(finished.map((task) => (Date.parse(task.completed_at) - Date.parse(task.created_at)) / 86400000).filter((value) => value >= 0))),
     });
     monthCursor = addMonths(monthCursor, -1);
@@ -411,7 +411,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
       done: donePeriod.length,
       donePrev: donePrev.length,
       overdue: overdueNow.length,
-      overduePrev: openThen.filter((task) => task.due_date && task.due_date < todayDate(new Date(periodStart))).length,
+      overduePrev: openThen.filter((task) => countsAsOverdue(task, todayDate(new Date(periodStart)))).length,
       avg: round1(mean(cycles)),
       avgPrev: round1(mean(prevCycles)),
       sparkOpen,

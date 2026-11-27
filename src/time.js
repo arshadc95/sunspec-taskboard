@@ -54,6 +54,19 @@ export function isOverdue(due, status, today = todayDate()) {
   return Boolean(due) && status !== 'done' && due < today;
 }
 
+export function externalWait(task) {
+  return String(task?.waiting_on || '').trim();
+}
+
+export function countsAsOverdue(task, today = todayDate()) {
+  if (externalWait(task)) return false;
+  return isOverdue(task?.due_date, task?.status, today);
+}
+
+export function countsForOnTime(task) {
+  return Boolean(task?.due_date) && !externalWait(task);
+}
+
 export function startOfWeekIso(now = new Date()) {
   const today = todayDate(now);
   const [year, month, day] = today.split('-').map(Number);

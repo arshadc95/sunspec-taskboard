@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import { colorForUser, colorsToStore, nextColor, normalizeColor } from './colors.js';
 import { hashPassword } from './passwords.js';
 import { grokMessage, notifyUser } from './events.js';
-import { dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, timerStopAt, todayDate } from './time.js';
+import { countsAsOverdue, countsForOnTime, dateInJohannesburg, entrySeconds, shiftDate, startOfMonthIso, startOfWeekIso, timerStopAt, todayDate } from './time.js';
 
 export function openDatabase(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -54,6 +54,7 @@ function migrate(db) {
       reviewer_id INTEGER REFERENCES users(id),
       completed_at TEXT,
       completion_note TEXT,
+      waiting_on TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -233,6 +234,9 @@ function migrate(db) {
   }
   if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'completion_note')) {
     db.exec('ALTER TABLE tasks ADD COLUMN completion_note TEXT');
+  }
+  if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'waiting_on')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN waiting_on TEXT');
   }
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
   if (!userColumns.some((column) => column.name === 'is_bot')) {
@@ -473,7 +477,7 @@ export function listTasks(db, filters) {
     params.push(filters.assigneeId);
   }
   if (filters.overdue) {
-    where.push("t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ?");
+    where.push("t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ? AND (t.waiting_on IS NULL OR TRIM(t.waiting_on) = '')");
     params.push(filters.today);
   }
   if (filters.nodue) where.push("(t.due_date IS NULL OR t.due_date = '')");
@@ -550,6 +554,7 @@ export function boardCounts(db, today) {
   const overdue = db.prepare(`
     SELECT COUNT(*) AS n FROM tasks
     WHERE status != 'done' AND deleted_at IS NULL AND due_date IS NOT NULL AND due_date != '' AND due_date < ?
+      AND (waiting_on IS NULL OR TRIM(waiting_on) = '')
   `).get(today).n;
   return { open, overdue };
 }
@@ -581,8 +586,8 @@ export function createTask(db, fields) {
   const info = db.prepare(`
     INSERT INTO tasks (
       title, description, assignee_id, status, priority, due_date, project_id, created_by,
-      completed_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      completed_at, waiting_on, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     fields.title,
     fields.description,
@@ -593,6 +598,7 @@ export function createTask(db, fields) {
     fields.projectId || null,
     fields.createdBy,
     completedAt,
+    fields.waitingOn || null,
     now,
     now,
   );
@@ -662,10 +668,13 @@ export function updateTask(db, id, fields) {
   const completionNote = fields.completionNote !== undefined
     ? (String(fields.completionNote || '').trim().slice(0, 280) || null)
     : (current.completion_note || null);
+  const waitingOn = fields.waitingOn !== undefined
+    ? (String(fields.waitingOn || '').trim().slice(0, 280) || null)
+    : (current.waiting_on || null);
   db.prepare(`
     UPDATE tasks
     SET title = ?, description = ?, assignee_id = ?, status = ?, priority = ?, due_date = ?,
-        project_id = ?, reviewer_id = ?, completed_at = ?, completion_note = ?, updated_at = ?
+        project_id = ?, reviewer_id = ?, completed_at = ?, completion_note = ?, waiting_on = ?, updated_at = ?
     WHERE id = ?
   `).run(
     fields.title,
@@ -678,6 +687,7 @@ export function updateTask(db, id, fields) {
     reviewerId,
     completedAt,
     completionNote,
+    waitingOn,
     now,
     id,
   );
@@ -889,7 +899,7 @@ export function managementReport(db, filters) {
   const people = filters.personId === 'none' ? [] : db.prepare(`
     SELECT u.id, u.name,
       SUM(CASE WHEN t.id IS NOT NULL AND t.status != 'done' THEN 1 ELSE 0 END) AS open_count,
-      SUM(CASE WHEN t.id IS NOT NULL AND t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
+      SUM(CASE WHEN t.id IS NOT NULL AND t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ? AND (t.waiting_on IS NULL OR TRIM(t.waiting_on) = '') THEN 1 ELSE 0 END) AS overdue_count,
       SUM(CASE WHEN t.completed_at IS NOT NULL AND t.completed_at >= ? THEN 1 ELSE 0 END) AS done_week
     FROM users u
     LEFT JOIN task_assignees ta ON ta.user_id = u.id
@@ -908,6 +918,7 @@ export function managementReport(db, filters) {
     LEFT JOIN users a ON a.id = t.assignee_id
     LEFT JOIN projects p ON p.id = t.project_id
     WHERE t.status != 'done' AND t.due_date IS NOT NULL AND t.due_date != '' AND t.due_date < ?
+      AND (t.waiting_on IS NULL OR TRIM(t.waiting_on) = '')
       AND ${overdueWhere}
     ORDER BY t.due_date ASC
     LIMIT 40
@@ -933,7 +944,7 @@ export function managementReport(db, filters) {
   const totals = db.prepare(`
     SELECT
       SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open_count,
-      SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
+      SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? AND (waiting_on IS NULL OR TRIM(waiting_on) = '') THEN 1 ELSE 0 END) AS overdue_count,
       SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_week,
       SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_7,
       SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_30
@@ -952,7 +963,7 @@ export function managementReport(db, filters) {
     unassigned = db.prepare(`
       SELECT
         SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open_count,
-        SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? THEN 1 ELSE 0 END) AS overdue_count,
+        SUM(CASE WHEN status != 'done' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? AND (waiting_on IS NULL OR TRIM(waiting_on) = '') THEN 1 ELSE 0 END) AS overdue_count,
         SUM(CASE WHEN completed_at IS NOT NULL AND completed_at >= ? THEN 1 ELSE 0 END) AS done_week
       FROM tasks
       WHERE deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = tasks.id) ${projectSql}
@@ -1357,8 +1368,8 @@ export function teamBoard(db, now = Date.now()) {
   const weekIso = startOfWeekIso(moment);
   const monthIso = startOfMonthIso(moment);
   const people = db.prepare("SELECT id, name, role, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE").all();
-  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
-  const openTasks = db.prepare("SELECT id, title, due_date, status FROM tasks WHERE status != 'done' AND deleted_at IS NULL").all();
+  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status, waiting_on FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
+  const openTasks = db.prepare("SELECT id, title, due_date, status, waiting_on FROM tasks WHERE status != 'done' AND deleted_at IS NULL").all();
   const members = new Map();
   for (const link of db.prepare('SELECT task_id, user_id FROM task_assignees').all()) {
     if (!members.has(link.task_id)) members.set(link.task_id, []);
@@ -1386,7 +1397,7 @@ export function teamBoard(db, now = Date.now()) {
       if (day) completedDates.add(day);
       if (task.completed_at >= weekIso) weekCount += 1;
       if (task.completed_at >= monthIso) monthCount += 1;
-      if (task.due_date) {
+      if (countsForOnTime(task)) {
         withDue += 1;
         if (day && day <= task.due_date) onTime += 1;
       }
@@ -1423,7 +1434,7 @@ export function teamBoard(db, now = Date.now()) {
         id: task.id,
         title: task.title,
         due: task.due_date,
-        late: task.due_date < today,
+        late: countsAsOverdue(task, today),
       }));
     return {
       id: person.id,
@@ -1431,7 +1442,7 @@ export function teamBoard(db, now = Date.now()) {
       role: person.role,
       color: colorForUser(person.id, person.color),
       open: mineOpen.length,
-      overdue: mineOpen.filter((task) => task.due_date && task.due_date < today).length,
+      overdue: mineOpen.filter((task) => countsAsOverdue(task, today)).length,
       weekCount,
       monthCount,
       weekHours: hoursFrom(userEntries, weekIso, now),
