@@ -515,7 +515,7 @@ function rowTimer(task, user, csrf, back) {
 }
 
 function timeActions(task, user, csrf, back) {
-  const buttons = `${logButton(task, back)}${rowTimer(task, user, csrf, back)}`;
+  const buttons = `${rowTimer(task, user, csrf, back)}${logButton(task, back)}`;
   return buttons ? `<span class="time-actions">${buttons}</span>` : '';
 }
 
