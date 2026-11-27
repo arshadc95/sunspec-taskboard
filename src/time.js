@@ -133,6 +133,83 @@ export function entryStart(ymd) {
   return new Date(ms).toISOString();
 }
 
+export function formatDayLabel(ymd) {
+  if (!isValidDate(ymd)) return '';
+  const ms = Date.parse(`${ymd}T12:00:00+02:00`);
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: TZ,
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(ms));
+}
+
+export function clockInJohannesburg(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TZ,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const hour = parts.find((part) => part.type === 'hour')?.value;
+  const minute = parts.find((part) => part.type === 'minute')?.value;
+  return hour && minute ? `${hour}:${minute}` : '';
+}
+
+export function formatEntryWhen(startedAt, endedAt) {
+  const start = new Date(startedAt);
+  if (Number.isNaN(start.getTime())) return '';
+  const date = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TZ,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(start);
+  const end = endedAt ? clockInJohannesburg(endedAt) : 'running';
+  const dur = formatDuration(entrySeconds(startedAt, endedAt));
+  return `${date}, ${clockInJohannesburg(startedAt)} – ${end} (${dur})`;
+}
+
+function clockValue(value) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(String(value || '').trim());
+  return match ? `${match[1]}:${match[2]}` : '';
+}
+
+export function entrySpan({ date, start, end, duration }) {
+  const day = String(date || '').trim();
+  const from = clockValue(start);
+  const to = clockValue(end);
+  if (isValidDate(day) && from && to) {
+    const startedMs = Date.parse(`${day}T${from}:00+02:00`);
+    const endedMs = Date.parse(`${day}T${to}:00+02:00`);
+    if (!Number.isFinite(startedMs) || !Number.isFinite(endedMs) || endedMs <= startedMs) return null;
+    const seconds = Math.round((endedMs - startedMs) / 1000);
+    if (seconds > 24 * 3600) return null;
+    return { startedAt: new Date(startedMs).toISOString(), endedAt: new Date(endedMs).toISOString(), seconds };
+  }
+  const seconds = parseDuration(duration);
+  const startedAt = entryStart(day);
+  if (!seconds || !startedAt) return null;
+  return {
+    startedAt,
+    endedAt: new Date(Date.parse(startedAt) + seconds * 1000).toISOString(),
+    seconds,
+  };
+}
+
+export function formatCsvTimeEntry(entry) {
+  const start = clockInJohannesburg(entry.started_at);
+  const end = entry.ended_at ? clockInJohannesburg(entry.ended_at) : 'running';
+  const dur = formatDuration(entrySeconds(entry.started_at, entry.ended_at));
+  const range = `${dateInJohannesburg(entry.started_at)} ${start}–${end} (${dur})`;
+  const note = String(entry.note || '').trim();
+  return note ? `${range}: ${note}` : range;
+}
+
 export function entrySeconds(startedAt, endedAt, now = Date.now()) {
   const start = Date.parse(startedAt);
   const end = endedAt ? Date.parse(endedAt) : now;

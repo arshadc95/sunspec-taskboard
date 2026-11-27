@@ -53,6 +53,7 @@ function migrate(db) {
       created_by INTEGER NOT NULL REFERENCES users(id),
       reviewer_id INTEGER REFERENCES users(id),
       completed_at TEXT,
+      completion_note TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -229,6 +230,9 @@ function migrate(db) {
   }
   if (!columns.some((column) => column.name === 'reviewer_id')) {
     db.exec('ALTER TABLE tasks ADD COLUMN reviewer_id INTEGER REFERENCES users(id)');
+  }
+  if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'completion_note')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN completion_note TEXT');
   }
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
   if (!userColumns.some((column) => column.name === 'is_bot')) {
@@ -512,6 +516,14 @@ export function listTasks(db, filters) {
     const term = likeTerm(filters.search);
     params.push(term, term, term);
   }
+  const statusOrder = `CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'review' THEN 2 ELSE 3 END`;
+  const priorityDesc = `CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'med' THEN 2 WHEN 'low' THEN 3 ELSE 4 END`;
+  const priorityAsc = `CASE t.priority WHEN 'low' THEN 0 WHEN 'med' THEN 1 WHEN 'high' THEN 2 WHEN 'urgent' THEN 3 ELSE 4 END`;
+  const order = filters.sort === 'priority_desc'
+    ? `${statusOrder}, ${priorityDesc}, t.updated_at DESC`
+    : filters.sort === 'priority_asc'
+      ? `${statusOrder}, ${priorityAsc}, t.updated_at DESC`
+      : `${statusOrder}, CASE WHEN t.due_date IS NULL OR t.due_date = '' THEN 1 ELSE 0 END, t.due_date ASC, t.updated_at DESC`;
   const sql = `
     SELECT t.*,
       a.name AS assignee_name,
@@ -528,11 +540,7 @@ export function listTasks(db, filters) {
     LEFT JOIN users r ON r.id = t.reviewer_id
     LEFT JOIN projects p ON p.id = t.project_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY
-      CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'review' THEN 2 ELSE 3 END,
-      CASE WHEN t.due_date IS NULL OR t.due_date = '' THEN 1 ELSE 0 END,
-      t.due_date ASC,
-      t.updated_at DESC
+    ORDER BY ${order}
   `;
   return attachAssignees(db, db.prepare(sql).all(...params));
 }
@@ -651,10 +659,13 @@ export function updateTask(db, id, fields) {
   let reviewerId = current.reviewer_id || null;
   if (fields.status !== 'review') reviewerId = null;
   else if (fields.reviewerId !== undefined) reviewerId = fields.reviewerId || null;
+  const completionNote = fields.completionNote !== undefined
+    ? (String(fields.completionNote || '').trim().slice(0, 280) || null)
+    : (current.completion_note || null);
   db.prepare(`
     UPDATE tasks
     SET title = ?, description = ?, assignee_id = ?, status = ?, priority = ?, due_date = ?,
-        project_id = ?, reviewer_id = ?, completed_at = ?, updated_at = ?
+        project_id = ?, reviewer_id = ?, completed_at = ?, completion_note = ?, updated_at = ?
     WHERE id = ?
   `).run(
     fields.title,
@@ -666,6 +677,7 @@ export function updateTask(db, id, fields) {
     fields.projectId || null,
     reviewerId,
     completedAt,
+    completionNote,
     now,
     id,
   );
@@ -1030,14 +1042,15 @@ export function startTimer(db, { userId, taskId }) {
   })();
 }
 
-export function stopTimer(db, { userId, taskId }) {
+export function stopTimer(db, { userId, taskId, note }) {
   const running = db.prepare(`
     SELECT * FROM time_entries WHERE user_id = ? AND task_id = ? AND ended_at IS NULL
   `).get(userId, taskId);
   if (!running) return null;
   const now = new Date().toISOString();
-  db.prepare('UPDATE time_entries SET ended_at = ?, updated_at = ? WHERE id = ?').run(now, now, running.id);
-  return { ...running, ended_at: now };
+  const text = String(note || '').trim().slice(0, 280);
+  db.prepare('UPDATE time_entries SET ended_at = ?, note = COALESCE(?, note), updated_at = ? WHERE id = ?').run(now, text || null, now, running.id);
+  return { ...running, ended_at: now, note: text || running.note || null };
 }
 
 export function getTimeEntry(db, id) {
@@ -1050,8 +1063,8 @@ export function getTimeEntry(db, id) {
   `).get(id) || null;
 }
 
-export function addManualEntry(db, { taskId, userId, startedAt, seconds, note }) {
-  const ended = new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
+export function addManualEntry(db, { taskId, userId, startedAt, endedAt, seconds, note }) {
+  const ended = endedAt || new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
   const now = new Date().toISOString();
   const info = db.prepare(`
     INSERT INTO time_entries (task_id, user_id, started_at, ended_at, auto_stopped, note, updated_at)
@@ -1060,8 +1073,8 @@ export function addManualEntry(db, { taskId, userId, startedAt, seconds, note })
   return Number(info.lastInsertRowid);
 }
 
-export function updateTimeEntry(db, id, { startedAt, seconds, note }) {
-  const ended = new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
+export function updateTimeEntry(db, id, { startedAt, endedAt, seconds, note }) {
+  const ended = endedAt || new Date(Date.parse(startedAt) + seconds * 1000).toISOString();
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE time_entries

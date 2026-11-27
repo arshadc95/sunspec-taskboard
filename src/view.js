@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { COLOR_NAMES, PALETTE, colorClass, colorForUser } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { dateInJohannesburg, entrySeconds, formatDateTime, formatDue, formatDuration, isOverdue, shiftDate } from './time.js';
+import { clockInJohannesburg, dateInJohannesburg, entrySeconds, formatDateTime, formatDayLabel, formatDue, formatDuration, formatEntryWhen, isOverdue, shiftDate } from './time.js';
 
 const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
@@ -126,6 +126,22 @@ function navLink(href, icon, label, active, badge = 0) {
 
 function sheetIcon(name) {
   return ICONS[name] || ICONS.tasks;
+}
+
+function listHref(filters, patch = {}) {
+  const next = { ...filters, ...patch };
+  const params = new URLSearchParams();
+  if (next.status) params.set('status', next.status);
+  if (next.mine) params.set('mine', '1');
+  else if (next.assigneeId === 'none') params.set('assignee', 'none');
+  else if (next.assigneeId) params.set('assignee', String(next.assigneeId));
+  if (next.projectId) params.set('project', String(next.projectId));
+  if (next.overdue) params.set('overdue', '1');
+  if (next.mentions) params.set('mentions', '1');
+  if (next.search) params.set('q', next.search);
+  if (next.sort) params.set('sort', next.sort);
+  const query = params.toString();
+  return `/${query ? `?${query}` : ''}`;
 }
 
 function sheet(title, inner, flush = false, icon = 'tasks', extra = '') {
@@ -559,9 +575,13 @@ function reviewDialog(csrf) {
 
 function completeControl(task, user, csrf, back, prominent = false) {
   if (task.status === 'done' || !canQuickStatus(user, task)) return '';
-  return `<form class="row-complete" method="post" action="/tasks/${task.id}/complete">
+  const note = prominent
+    ? '<input name="completion_note" maxlength="280" placeholder="Completion note" aria-label="Completion note">'
+    : '';
+  return `<form class="row-complete${prominent ? ' complete-note' : ''}" method="post" action="/tasks/${task.id}/complete">
     <input type="hidden" name="_csrf" value="${esc(csrf)}">
     <input type="hidden" name="back" value="${esc(back)}">
+    ${note}
     <button class="btn ${prominent ? 'btn-primary' : 'btn-tiny complete'}" type="submit" title="Mark done">${prominent ? '✓ Complete' : '✓'}</button>
   </form>`;
 }
@@ -627,7 +647,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const cards = tasks.filter((task) => task.status !== 'done' || showDone).map((task) => taskCard(task, today, user, csrf, back)).join('');
   const table = `<div class="table-wrap board-table"><table class="grid">
         <thead><tr>
-          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th>Priority</th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th><th></th>
+          <th>Task</th><th>Project</th><th>Assignee</th><th>Status</th><th><a class="sort-link" href="${esc(listHref(filters, { sort: filters.sort === 'priority_desc' ? 'priority_asc' : 'priority_desc' }))}">Priority${filters.sort === 'priority_desc' ? ' ▼' : filters.sort === 'priority_asc' ? ' ▲' : ''}</a></th><th>Due</th><th>Time</th><th>Comments</th><th>Updated</th><th></th>
         </tr></thead>
         <tbody>
           ${openGroups.map((group) => `
@@ -652,6 +672,7 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
   const myDayHtml = `<div class="dayline">
       <div class="dayline-stats">
         <span class="dayline-kicker">My day</span>
+        <time class="dayline-date" datetime="${esc(today)}">${esc(formatDayLabel(today))}</time>
         <a href="/?mine=1">${mineDay.open} open</a>
         <a href="/?mine=1&amp;due=today">${mineDay.dueToday} due today</a>
         ${mineDay.timer ? `<a href="/tasks/${mineDay.timer.task_id}">Timer · ${esc(mineDay.timer.title)}</a>` : '<span>No timer running</span>'}
@@ -676,6 +697,11 @@ export function renderBoard({ user, csrf, msg, tasks, filters, users, projects, 
         <label class="tog"><input type="checkbox" name="mine" value="1"${filters.mine ? ' checked' : ''}><span>My tasks</span></label>
         <label class="tog"><input type="checkbox" name="overdue" value="1"${filters.overdue ? ' checked' : ''}><span>Overdue</span></label>
         <label class="tog"><input type="checkbox" name="mentions" value="1"${filters.mentions ? ' checked' : ''}><span>Mentions</span></label>
+        <select name="sort" aria-label="Sort">
+          <option value="">Sort</option>
+          <option value="priority_desc"${filters.sort === 'priority_desc' ? ' selected' : ''}>Priority high–low</option>
+          <option value="priority_asc"${filters.sort === 'priority_asc' ? ' selected' : ''}>Priority low–high</option>
+        </select>
         <a class="btn btn-tiny" data-csv href="/export.csv${exportQuery ? `?${esc(exportQuery)}` : ''}">CSV</a>
         <a class="btn btn-tiny" href="/">Clear</a>
       </form>`;
@@ -718,7 +744,7 @@ function renderTimer(task, csrf, timer, user, users, today) {
     ? ''
     : mine
     ? `<p class="timer-live" data-started="${esc(mine.started_at)}">Running since ${esc(formatDateTime(mine.started_at))} · <strong class="timer-elapsed">${esc(formatDuration(entrySeconds(mine.started_at, null)))}</strong></p>
-      <form method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-danger" type="submit">Stop</button></form>`
+      <form class="time-row" method="post" action="/tasks/${task.id}/timer/stop"><input type="hidden" name="_csrf" value="${esc(csrf)}"><input name="note" maxlength="280" placeholder="What was done" aria-label="Work note"><button class="btn btn-danger" type="submit">Stop</button></form>`
     : `<form method="post" action="/tasks/${task.id}/timer/start"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Start</button></form>
       ${timer.other ? `<p class="hint">Starting stops your timer on <a href="/tasks/${timer.other.task_id}">${esc(timer.other.task_title)}</a>.</p>` : ''}`;
   const people = (users || []).filter((person) => person.active !== 0 && !person.is_bot);
@@ -729,13 +755,20 @@ function renderTimer(task, csrf, timer, user, users, today) {
     const canAmend = user.role === 'superuser' || entry.user_id === user.id;
     const when = dateInJohannesburg(entry.started_at) || today;
     return `<li>
-      <p>${nameLine(entry.user_name, entry.color, entry.user_id)} · ${esc(formatDateTime(entry.started_at))} · <strong>${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}</strong>${entry.auto_stopped ? ' <span class="auto-badge">Auto-stopped</span>' : ''}${entry.note ? ` · ${esc(entry.note)}` : ''}</p>
+      <p>${nameLine(entry.user_name, entry.color, entry.user_id)} <span class="time-when">${esc(formatEntryWhen(entry.started_at, entry.ended_at))}</span>${entry.auto_stopped ? ' <span class="auto-badge">Auto-stopped</span>' : ''}</p>
+      ${entry.note ? `<p class="time-note">${esc(entry.note)}</p>` : ''}
       ${canAmend ? `<form class="time-edit" method="post" action="/tasks/${task.id}/time/${entry.id}">
         <input type="hidden" name="_csrf" value="${esc(csrf)}">
-        <input name="duration" required value="${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}" aria-label="Duration" placeholder="1h 30m">
-        <input type="date" name="date" required value="${esc(when)}" aria-label="Date">
-        <input name="note" maxlength="120" value="${esc(entry.note || '')}" placeholder="Note" aria-label="Note">
-        <button class="btn btn-tiny" type="submit">Save</button>
+        <div class="time-row">
+          <input type="date" name="date" required value="${esc(when)}" aria-label="Date">
+          <input type="time" name="start" value="${esc(clockInJohannesburg(entry.started_at))}" aria-label="Start">
+          <input type="time" name="end" value="${esc(entry.ended_at ? clockInJohannesburg(entry.ended_at) : '')}" aria-label="End">
+        </div>
+        <div class="time-row">
+          <input name="duration" value="${esc(formatDuration(entrySeconds(entry.started_at, entry.ended_at)))}" aria-label="Duration" placeholder="or 1h 30m">
+          <input name="note" maxlength="280" value="${esc(entry.note || '')}" placeholder="What was done / still outstanding" aria-label="Work note">
+          <button class="btn btn-tiny" type="submit">Save</button>
+        </div>
       </form>
       <form method="post" action="/tasks/${task.id}/time/${entry.id}/delete" data-confirm="Delete this time entry?">
         <input type="hidden" name="_csrf" value="${esc(csrf)}">
@@ -753,11 +786,13 @@ function renderTimer(task, csrf, timer, user, users, today) {
       <input type="hidden" name="_csrf" value="${esc(csrf)}">
       ${logFor}
       <div class="time-row">
-        <input name="duration" required placeholder="1h 30m" aria-label="Duration">
         <input type="date" name="date" required value="${esc(today || '')}" aria-label="Date">
+        <input type="time" name="start" aria-label="Start">
+        <input type="time" name="end" aria-label="End">
       </div>
       <div class="time-row">
-        <input name="note" maxlength="120" placeholder="Note" aria-label="Note">
+        <input name="duration" placeholder="or 1h 30m" aria-label="Duration">
+        <input name="note" maxlength="280" placeholder="What was done / still outstanding" aria-label="Work note">
         <button class="btn" type="submit">Log time</button>
       </div>
     </form>
@@ -779,7 +814,7 @@ export function renderTask({ user, csrf, msg, task, comments, users, projects, a
   const title = isNew ? 'New task' : task.title;
   const editable = isNew || canEdit;
   const meta = !isNew
-    ? `<p class="meta">Created by ${nameLine(task.creator_name || 'Unknown', task.creator_color, task.created_by)} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${nameLine(task.reviewer_name, task.reviewer_color, task.reviewer_id)}</p>` : ''}`
+    ? `<p class="meta">Created by ${nameLine(task.creator_name || 'Unknown', task.creator_color, task.created_by)} · ${esc(formatDateTime(task.created_at))} · Updated ${esc(formatDateTime(task.updated_at))}</p>${task.status === 'review' && task.reviewer_name ? `<p class="meta">Reviewer: ${nameLine(task.reviewer_name, task.reviewer_color, task.reviewer_id)}</p>` : ''}${task.completion_note ? `<p class="completion-note">Done: ${esc(task.completion_note)}</p>` : ''}`
     : '';
   const saveButtons = editable
     ? `${isNew ? '<button class="btn btn-line" type="submit" form="task-edit" name="again" value="1" data-task-save disabled>Save & add another</button>' : ''}<button class="btn btn-line" type="submit" form="task-edit" data-task-save disabled>Save</button>`

@@ -359,3 +359,92 @@ test('mentions ignore deleted tasks and only open Done when one is unread', { ti
     db.close();
   }
 });
+
+test('priority sort matches the list and the csv, and time notes keep start and end', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-sort-'));
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'board.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const home = await page(base, admin.cookies, '/');
+    assert.match(home.text, /class="dayline-date"/);
+    assert.match(home.text, /Fri, 27 Nov 2026|Sat, 28 Nov 2026|Thu, 26 Nov 2026/);
+    assert.match(home.text, /name="sort"/);
+    const form = await page(base, admin.cookies, '/tasks/new');
+    const add = async (title, priority) => {
+      const res = await post(base, admin.cookies, '/tasks', {
+        _csrf: form.csrf,
+        title,
+        description: '',
+        status: 'todo',
+        priority,
+        due_date: '',
+        assignee_id: '',
+        project_id: '',
+        new_project: '',
+      });
+      return Number(res.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    };
+    await add('Low cable', 'low');
+    const urgentId = await add('Urgent inverter', 'urgent');
+    await add('Med visit', 'med');
+    const order = (text) => ['Urgent inverter', 'Med visit', 'Low cable'].map((title) => text.indexOf(title));
+    const desc = await page(base, admin.cookies, '/?sort=priority_desc');
+    const descAt = order(desc.text);
+    assert.ok(descAt[0] < descAt[1] && descAt[1] < descAt[2]);
+    assert.match(desc.text, /class="sort-link"/);
+    assert.match(desc.text, /Priority ▼/);
+    const asc = await page(base, admin.cookies, '/?sort=priority_asc');
+    const ascAt = ['Low cable', 'Med visit', 'Urgent inverter'].map((title) => asc.text.indexOf(title));
+    assert.ok(ascAt[0] < ascAt[1] && ascAt[1] < ascAt[2]);
+    assert.match(asc.text, /Priority ▲/);
+    const csvDesc = await fetch(`${base}/export.csv?sort=priority_desc`, { headers: { cookie: admin.cookies.header() } });
+    const csvText = await csvDesc.text();
+    const csvAt = order(csvText);
+    assert.ok(csvAt[0] < csvAt[1] && csvAt[1] < csvAt[2]);
+    assert.match(csvText.split('\n')[0], /Time Entries/);
+    assert.match(csvText.split('\n')[0], /Completion Note/);
+    const detail = await page(base, admin.cookies, `/tasks/${urgentId}`);
+    const logged = await post(base, admin.cookies, `/tasks/${urgentId}/time`, {
+      _csrf: detail.csrf,
+      date: '2026-11-26',
+      start: '08:30',
+      end: '10:00',
+      note: 'Replaced the breaker',
+    });
+    assert.equal(logged.status, 302);
+    const shown = await page(base, admin.cookies, `/tasks/${urgentId}`);
+    assert.match(shown.text, /26 Nov 2026, 08:30 – 10:00 \(1h 30m\)/);
+    assert.match(shown.text, /Replaced the breaker/);
+    const done = await post(base, admin.cookies, `/tasks/${urgentId}/complete`, {
+      _csrf: detail.csrf,
+      back: `/tasks/${urgentId}`,
+      completion_note: 'Meter commissioned',
+    });
+    assert.equal(done.status, 302);
+    const closed = await page(base, admin.cookies, `/tasks/${urgentId}`);
+    assert.match(closed.text, /Meter commissioned/);
+    const csvNote = await (await fetch(`${base}/export.csv?sort=priority_desc`, { headers: { cookie: admin.cookies.header() } })).text();
+    assert.match(csvNote, /2026-11-26 08:30–10:00 \(1h 30m\): Replaced the breaker/);
+    assert.match(csvNote, /Meter commissioned/);
+    const blank = await post(base, admin.cookies, `/tasks/${urgentId}/complete`, {
+      _csrf: detail.csrf,
+      back: '/',
+    });
+    assert.equal(blank.status, 302);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
+});

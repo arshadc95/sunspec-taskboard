@@ -95,7 +95,7 @@ import { hashPassword, verifyPassword } from './passwords.js';
 import { mentionedUserIds } from './mentions.js';
 import { canCompleteTask, canControlTimer, canDeleteComment, canEditTask, canEditUser, canRemoveTask, isStaff } from './permissions.js';
 import { boardChanged, closeAll, subscribe } from './events.js';
-import { durationFromParts, entrySeconds, entryStart, formatDue, formatDuration, formatDurationClock, isValidDate, parseDuration, todayDate } from './time.js';
+import { durationFromParts, entrySeconds, entrySpan, entryStart, formatCsvTimeEntry, formatDue, formatDuration, formatDurationClock, isValidDate, parseDuration, todayDate } from './time.js';
 import { buildManage } from './manage.js';
 import { fileExpiry, grokConnected, grokFileExpiry, isPdf, mountBot, pdfFilename, postGrokWebhook, rateLimitMessage, recentContext, webhookFiles } from './grok.js';
 import {
@@ -487,8 +487,9 @@ export function createApp(config) {
   app.get('/export.csv', requireUser, (req, res) => {
     const filters = readFilters(req);
     const tasks = withTime(db, listTasks(db, filters));
-    const header = ['id', 'title', 'description', 'project', 'assignee', 'status', 'priority', 'due', 'created by', 'comments', 'time', 'created', 'updated', 'overdue'];
+    const header = ['id', 'title', 'description', 'project', 'assignee', 'status', 'priority', 'due', 'created by', 'comments', 'time', 'Time Entries', 'Completion Note', 'created', 'updated', 'overdue'];
     const lines = [header.join(',')];
+    const entryText = csvTimeEntries(db, tasks);
     for (const task of tasks) {
       lines.push([
         task.id,
@@ -502,6 +503,8 @@ export function createApp(config) {
         task.creator_name || '',
         task.comment_count,
         formatDuration(task.time_seconds || 0),
+        entryText.get(task.id) || '',
+        task.completion_note || '',
         task.created_at,
         task.updated_at,
         isOverdueTask(task, filters.today) ? 'yes' : 'no',
@@ -658,7 +661,7 @@ export function createApp(config) {
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
     if (!canControlTimer(req.user, task)) return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
-    const stopped = stopTimer(db, { userId: req.user.id, taskId: task.id });
+    const stopped = stopTimer(db, { userId: req.user.id, taskId: task.id, note: String(req.body.note || '') });
     if (!stopped) return res.redirect(timerReturn(req, task.id, 'notimer'));
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: 'Stopped the timer' });
     res.redirect(timerReturn(req, task.id, 'stopped'));
@@ -669,18 +672,17 @@ export function createApp(config) {
     const id = numericId(req.params.id);
     const task = id ? getTask(db, id) : null;
     if (!task) return html(res, 404, renderNotFound({ user: req.user, csrf: ensureCsrf(req, res) }));
-    const seconds = readDuration(req.body);
-    const startedAt = entryStart(String(req.body.date || todayDate()));
-    if (!seconds || !startedAt) return res.redirect(`/tasks/${task.id}?msg=invalid`);
+    const span = readSpan(req.body);
+    if (!span) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     let userId = req.user.id;
     if (req.user.role === 'superuser' && numericId(req.body.user_id)) {
       const person = getUser(db, numericId(req.body.user_id));
       if (!person || !person.active || person.is_bot) return res.redirect(`/tasks/${task.id}?msg=invalid`);
       userId = person.id;
     }
-    const note = String(req.body.note || '').trim().slice(0, 120);
-    addManualEntry(db, { taskId: task.id, userId, startedAt, seconds, note });
-    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: `Logged ${formatDurationClock(seconds)}` });
+    const note = String(req.body.note || '').trim().slice(0, 280);
+    addManualEntry(db, { taskId: task.id, userId, startedAt: span.startedAt, endedAt: span.endedAt, seconds: span.seconds, note });
+    addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'timer', detail: `Logged ${formatDurationClock(span.seconds)}` });
     res.redirect(`/tasks/${task.id}?msg=saved`);
   });
 
@@ -692,15 +694,14 @@ export function createApp(config) {
     if (req.user.role !== 'superuser' && entry.user_id !== req.user.id) {
       return html(res, 403, renderForbidden({ user: req.user, csrf: ensureCsrf(req, res) }));
     }
-    const seconds = readDuration(req.body);
-    const startedAt = entryStart(String(req.body.date || ''));
-    if (!seconds || !startedAt) return res.redirect(`/tasks/${taskId}?msg=invalid`);
+    const span = readSpan(req.body);
+    if (!span) return res.redirect(`/tasks/${taskId}?msg=invalid`);
     const before = entrySeconds(entry.started_at, entry.ended_at);
-    const note = String(req.body.note || '').trim().slice(0, 120);
-    updateTimeEntry(db, entry.id, { startedAt, seconds, note });
-    const detail = before === seconds
+    const note = String(req.body.note || '').trim().slice(0, 280);
+    updateTimeEntry(db, entry.id, { startedAt: span.startedAt, endedAt: span.endedAt, seconds: span.seconds, note });
+    const detail = before === span.seconds
       ? 'Updated a time entry'
-      : `Amended time from ${formatDurationClock(before)} to ${formatDurationClock(seconds)}`;
+      : `Amended time from ${formatDurationClock(before)} to ${formatDurationClock(span.seconds)}`;
     addActivity(db, { taskId, actorId: req.user.id, action: 'timer', detail });
     res.redirect(`/tasks/${taskId}?msg=saved`);
   });
@@ -765,6 +766,7 @@ export function createApp(config) {
         priority: task.priority,
         dueDate: task.due_date,
         projectId: task.project_id,
+        completionNote: String(req.body.completion_note || ''),
       });
       logTaskChanges(db, req.user, task, updated);
       stopTimersOnTask(db, task.id);
@@ -1301,6 +1303,7 @@ function readFilters(req) {
     overdue: req.query.overdue === '1',
     nodue: req.query.nodue === '1',
     search: String(req.query.q || '').trim().slice(0, 100),
+    sort: req.query.sort === 'priority_desc' || req.query.sort === 'priority_asc' ? req.query.sort : '',
     today: todayDate(),
   };
 }
@@ -1315,6 +1318,7 @@ function filterQuery(filters) {
   if (filters.overdue) params.set('overdue', '1');
   if (filters.mentions) params.set('mentions', '1');
   if (filters.search) params.set('q', filters.search);
+  if (filters.sort) params.set('sort', filters.sort);
   return params.toString();
 }
 
@@ -1343,6 +1347,43 @@ function rememberMentions(db, taskId, text, actorId) {
   const ids = activeUserIds(db, mentionedUserIds(text, listActiveUsers(db)));
   setTaskMentions(db, taskId, ids);
   notifyMentions(db, { taskId, userIds: ids, actorId });
+}
+
+function csvTimeEntries(db, tasks) {
+  const map = new Map();
+  if (!tasks.length) return map;
+  const marks = tasks.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT task_id, started_at, ended_at, note
+    FROM time_entries
+    WHERE task_id IN (${marks})
+    ORDER BY started_at, id
+  `).all(...tasks.map((task) => task.id));
+  for (const row of rows) {
+    const list = map.get(row.task_id) || [];
+    list.push(formatCsvTimeEntry(row));
+    map.set(row.task_id, list);
+  }
+  for (const [id, list] of map) map.set(id, list.join('; '));
+  return map;
+}
+
+function readSpan(body) {
+  const span = entrySpan({
+    date: String(body.date || ''),
+    start: body.start,
+    end: body.end,
+    duration: body.duration,
+  });
+  if (span) return span;
+  const seconds = durationFromParts(body.hours, body.minutes);
+  const startedAt = entryStart(String(body.date || ''));
+  if (!seconds || !startedAt) return null;
+  return {
+    startedAt,
+    endedAt: new Date(Date.parse(startedAt) + seconds * 1000).toISOString(),
+    seconds,
+  };
 }
 
 function readDuration(body) {
