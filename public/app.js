@@ -316,12 +316,11 @@ if (reviewDialog && reviewForm && reviewerSearch && reviewerId) {
         pushForm.action = `/tasks/${button.dataset.task}/reschedule`;
         pushForm.querySelector('[data-reschedule-back]').value = button.dataset.back || '/';
         pushForm.querySelector('[data-reschedule-title]').textContent = button.dataset.title || '';
-        pushForm.querySelector('[name="reason"]').value = '';
         const waiting = button.dataset.waiting || '';
-        const box = pushForm.querySelector('[data-waiting-external]');
-        const input = pushForm.querySelector('[data-waiting-input]');
+        const reason = pushForm.querySelector('[name="reason"]');
+        const box = pushForm.querySelector('[name="waiting"]');
+        if (reason) reason.value = waiting;
         if (box) box.checked = Boolean(waiting);
-        if (input) input.value = waiting;
       });
     });
   });

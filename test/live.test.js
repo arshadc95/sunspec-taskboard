@@ -108,6 +108,8 @@ test('old tasks gain a waiting_on column', () => {
   const db = openDatabase(file);
   const names = db.prepare('PRAGMA table_info(tasks)').all().map((column) => column.name);
   assert.ok(names.includes('waiting_on'));
+  assert.ok(names.includes('external_delay'));
+  assert.ok(names.includes('push_count'));
   db.close();
 });
 
@@ -582,7 +584,13 @@ test('a task waiting on someone else is left out of overdue counts and on-time p
     const late = await page(base, admin.cookies, '/');
     assert.match(late.text, /1 overdue/);
     assert.match(late.text, /task-row overdue/);
-    assert.match(late.text, /Waiting on external \(not our delay\)/);
+    assert.match(late.text, /name="reason"[^>]*placeholder="Reason \(e\.g\. Waiting on supplier \/ client\)"/);
+    assert.match(late.text, /name="waiting" value="1"/);
+    assert.match(late.text, /External delay \(remove from overdue count\)/);
+    assert.doesNotMatch(late.text, /name="waiting_on"/);
+    assert.match(late.text, />Duration</);
+    assert.match(late.text, />Start</);
+    assert.match(late.text, />End</);
     assert.match(late.text, /id="reschedule-dialog"/);
     const filtered = await page(base, admin.cookies, '/?overdue=1');
     assert.match(filtered.text, /Held meter/);
@@ -594,17 +602,15 @@ test('a task waiting on someone else is left out of overdue counts and on-time p
     const held = await post(base, admin.cookies, `/tasks/${taskId}/reschedule`, {
       _csrf: detail.csrf,
       due_date: '2026-11-21',
-      reason: 'Site priority shift',
-      waiting_present: '1',
-      waiting_external: '1',
-      waiting_on: 'Waiting on supplier',
+      reason: 'Waiting on supplier',
+      waiting: '1',
       back: `/tasks/${taskId}`,
     });
     assert.equal(held.status, 302);
     assert.equal(db.prepare('SELECT due_date, waiting_on FROM tasks WHERE id = ?').get(taskId).waiting_on, 'Waiting on supplier');
     assert.equal(db.prepare('SELECT due_date FROM tasks WHERE id = ?').get(taskId).due_date, '2026-11-21');
     const notes = db.prepare('SELECT detail FROM activity WHERE task_id = ? ORDER BY id').all(taskId).map((row) => row.detail);
-    assert.ok(notes.some((line) => /Rescheduled due date from 20 Nov 2026 to 21 Nov 2026: Site priority shift/.test(line)));
+    assert.ok(notes.some((line) => /Rescheduled due date from 20 Nov 2026 to 21 Nov 2026: Waiting on supplier/.test(line)));
     assert.ok(notes.some((line) => line === 'Waiting on external: Waiting on supplier'));
 
     const calm = await page(base, admin.cookies, '/');
@@ -620,30 +626,34 @@ test('a task waiting on someone else is left out of overdue counts and on-time p
     const csv = await (await fetch(`${base}/export.csv`, { headers: { cookie: admin.cookies.header() } })).text();
     assert.match(csv.split('\n')[0], /Waiting On/);
     assert.match(csv, /Waiting on supplier/);
+    assert.doesNotMatch(calm.text, /wait-clear/);
+    assert.doesNotMatch(calm.text, /Pushed ×/);
+    assert.equal(db.prepare('SELECT push_count FROM tasks WHERE id = ?').get(taskId).push_count, 1);
+    const once = await page(base, admin.cookies, `/tasks/${taskId}`);
+    assert.match(once.text, /Pushed ×1/);
+    assert.doesNotMatch(once.text, /wait-clear/);
+    const manage = await page(base, admin.cookies, '/manage');
+    assert.match(manage.text, /Pushed ×1/);
 
-    const cleared = await post(base, admin.cookies, `/tasks/${taskId}/waiting`, {
+    const again = await post(base, admin.cookies, `/tasks/${taskId}/reschedule`, {
       _csrf: detail.csrf,
-      clear: '1',
-      back: '/',
+      due_date: '2026-11-22',
+      reason: 'Still waiting',
+      waiting: '1',
+      back: `/tasks/${taskId}`,
     });
-    assert.equal(cleared.status, 302);
-    assert.equal(db.prepare('SELECT waiting_on FROM tasks WHERE id = ?').get(taskId).waiting_on, null);
-    assert.match((await page(base, admin.cookies, '/')).text, /1 overdue/);
-    assert.ok(db.prepare('SELECT detail FROM activity WHERE task_id = ? ORDER BY id DESC').get(taskId).detail.includes('Cleared the external wait'));
-
-    await post(base, admin.cookies, `/tasks/${taskId}/waiting`, {
-      _csrf: detail.csrf,
-      waiting_present: '1',
-      waiting_external: '1',
-      waiting_on: 'Waiting on supplier',
-      back: '/',
-    });
+    assert.equal(again.status, 302);
+    assert.equal(db.prepare('SELECT push_count, waiting_on FROM tasks WHERE id = ?').get(taskId).push_count, 2);
+    assert.match((await page(base, admin.cookies, '/')).text, /Pushed ×2/);
     assert.equal(teamBoard(db).find((row) => row.id === adminId).overdue, 0);
     const doneLate = await post(base, admin.cookies, `/tasks/${taskId}/complete`, {
       _csrf: detail.csrf,
       back: '/',
     });
     assert.equal(doneLate.status, 302);
+    const closed = db.prepare('SELECT waiting_on, external_delay FROM tasks WHERE id = ?').get(taskId);
+    assert.equal(closed.waiting_on, null);
+    assert.equal(closed.external_delay, 1);
     const onTimeForm = await page(base, admin.cookies, '/tasks/new');
     const onTime = await post(base, admin.cookies, '/tasks', {
       _csrf: onTimeForm.csrf,

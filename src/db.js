@@ -55,6 +55,8 @@ function migrate(db) {
       completed_at TEXT,
       completion_note TEXT,
       waiting_on TEXT,
+      external_delay INTEGER NOT NULL DEFAULT 0,
+      push_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -237,6 +239,12 @@ function migrate(db) {
   }
   if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'waiting_on')) {
     db.exec('ALTER TABLE tasks ADD COLUMN waiting_on TEXT');
+  }
+  if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'external_delay')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN external_delay INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'push_count')) {
+    db.exec('ALTER TABLE tasks ADD COLUMN push_count INTEGER NOT NULL DEFAULT 0');
   }
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
   if (!userColumns.some((column) => column.name === 'is_bot')) {
@@ -668,13 +676,18 @@ export function updateTask(db, id, fields) {
   const completionNote = fields.completionNote !== undefined
     ? (String(fields.completionNote || '').trim().slice(0, 280) || null)
     : (current.completion_note || null);
-  const waitingOn = fields.waitingOn !== undefined
+  let waitingOn = fields.waitingOn !== undefined
     ? (String(fields.waitingOn || '').trim().slice(0, 280) || null)
     : (current.waiting_on || null);
+  let externalDelay = Number(current.external_delay) ? 1 : 0;
+  if (fields.status === 'done' && (String(waitingOn || '').trim() || String(current.waiting_on || '').trim())) {
+    externalDelay = 1;
+    waitingOn = null;
+  }
   db.prepare(`
     UPDATE tasks
     SET title = ?, description = ?, assignee_id = ?, status = ?, priority = ?, due_date = ?,
-        project_id = ?, reviewer_id = ?, completed_at = ?, completion_note = ?, waiting_on = ?, updated_at = ?
+        project_id = ?, reviewer_id = ?, completed_at = ?, completion_note = ?, waiting_on = ?, external_delay = ?, updated_at = ?
     WHERE id = ?
   `).run(
     fields.title,
@@ -688,6 +701,7 @@ export function updateTask(db, id, fields) {
     completedAt,
     completionNote,
     waitingOn,
+    externalDelay,
     now,
     id,
   );
@@ -1368,7 +1382,7 @@ export function teamBoard(db, now = Date.now()) {
   const weekIso = startOfWeekIso(moment);
   const monthIso = startOfMonthIso(moment);
   const people = db.prepare("SELECT id, name, role, color FROM users WHERE active = 1 AND is_bot = 0 ORDER BY name COLLATE NOCASE").all();
-  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status, waiting_on FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
+  const done = db.prepare("SELECT id, created_by, assignee_id, due_date, completed_at, status, waiting_on, external_delay FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND deleted_at IS NULL").all();
   const openTasks = db.prepare("SELECT id, title, due_date, status, waiting_on FROM tasks WHERE status != 'done' AND deleted_at IS NULL").all();
   const members = new Map();
   for (const link of db.prepare('SELECT task_id, user_id FROM task_assignees').all()) {

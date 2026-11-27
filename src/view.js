@@ -454,14 +454,14 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
               <input name="due_date" type="date" value="${esc(due)}" data-due-input ${off}>
             </div>
             ${waitingFields(value, off)}
+            ${pushTag(value.push_count, 1)}
           </div>
           ${metaHtml}
         </section>
       </aside>`;
     const linked = canEdit ? ' form="task-edit"' : '';
     const details = body.match(/<section class="form-card task-details">[\s\S]*?<\/section>/)?.[0] || '';
-    let aside = (body.match(/<aside class="task-side">[\s\S]*<\/aside>/)?.[0] || '').replace(/<(input|select|textarea)\b/g, `<$1${linked}`);
-    if (value.id && externalWait(value) && canEdit) aside = aside.replace('</aside>', `${clearWaitingForm(value, csrf, `/tasks/${value.id}`)}</aside>`);
+    const aside = (body.match(/<aside class="task-side">[\s\S]*<\/aside>/)?.[0] || '').replace(/<(input|select|textarea)\b/g, `<$1${linked}`);
     const head = `<input type="hidden" name="_csrf" value="${esc(csrf)}">${from ? `<input type="hidden" name="from" value="${esc(from)}">` : ''}`;
     if (!canEdit) {
       return `<div class="task-col"><div class="task-form is-readonly">${details}</div><!--REST--></div><div class="task-col">${aside}<!--RAIL--></div>`;
@@ -527,25 +527,21 @@ function rescheduleButton(task, user, today, back) {
 function waitingFields(task, off) {
   const reason = externalWait(task);
   return `<input type="hidden" name="waiting_present" value="1">
-    <label class="check-line"><input type="checkbox" name="waiting_external" value="1"${reason ? ' checked' : ''} ${off}><span>Waiting on external (not our delay)</span></label>
+    <label class="check-row"><input type="checkbox" name="waiting_external" value="1"${reason ? ' checked' : ''} ${off}><span>Waiting on external (not our delay)</span></label>
     <input name="waiting_on" maxlength="280" value="${esc(reason)}" placeholder="Waiting on supplier / client" aria-label="Waiting on" ${off}>
     ${reason ? `<p class="waiting-badge">Waiting: ${esc(reason)}</p>` : ''}`;
 }
 
-function clearWaitingForm(task, csrf, back) {
-  return `<form class="wait-clear" method="post" action="/tasks/${task.id}/waiting">
-    <input type="hidden" name="_csrf" value="${esc(csrf)}">
-    <input type="hidden" name="back" value="${esc(back)}">
-    <input type="hidden" name="clear" value="1">
-    <button class="btn btn-tiny" type="submit">Clear</button>
-  </form>`;
+function pushTag(count, min = 2) {
+  const n = Number(count) || 0;
+  if (n < min) return '';
+  return `<span class="push-tag">Pushed ×${n}</span>`;
 }
 
-function waitingMark(task, user, csrf, back) {
+function waitingMark(task) {
   const reason = externalWait(task);
   if (!reason || task.status === 'done') return '';
-  const clear = canQuickStatus(user, task) ? clearWaitingForm(task, csrf, back) : '';
-  return `<span class="waiting-badge">Waiting: ${esc(reason)}</span>${clear}`;
+  return `<span class="waiting-badge">Waiting: ${esc(reason)}</span>`;
 }
 
 function dueTone(task, today) {
@@ -642,14 +638,12 @@ function quickDialogs(csrf, today) {
       <input type="hidden" name="back" value="/" data-log-back>
       <p class="dialog-title" data-log-title></p>
       ${durationChips(chips)}
-      <div class="time-row">
-        <input name="duration" placeholder="or 1h 30m" aria-label="Duration">
-        <input type="time" name="start" aria-label="Start">
-        <input type="time" name="end" aria-label="End">
-      </div>
-      <div class="time-row">
-        <input type="date" name="date" required value="${esc(day)}" aria-label="Date">
-        <input name="note" maxlength="280" placeholder="What was done / outstanding" aria-label="Work note">
+      <div class="quick-grid">
+        <label class="quick-field"><span>Duration</span><input name="duration" placeholder="or 1h 30m" aria-label="Duration"></label>
+        <label class="quick-field"><span>Start</span><input type="time" name="start" aria-label="Start"></label>
+        <label class="quick-field"><span>End</span><input type="time" name="end" aria-label="End"></label>
+        <label class="quick-field"><span>Date</span><input type="date" name="date" required value="${esc(day)}" aria-label="Date"></label>
+        <label class="quick-field quick-span"><span>Note</span><input name="note" maxlength="280" placeholder="What was done / outstanding" aria-label="Work note"></label>
       </div>
       <div class="form-footer"><button class="btn btn-primary" type="submit">Log time</button></div>
     </form>
@@ -681,10 +675,8 @@ function quickDialogs(csrf, today) {
         <button type="button" class="chip" data-set-date="${esc(shiftDate(day, 7))}">Next week</button>
       </div>
       <input type="date" name="due_date" required value="${esc(day)}" aria-label="Due date">
-      <input name="reason" maxlength="280" placeholder="Waiting on supplier" aria-label="Reason">
-      <input type="hidden" name="waiting_present" value="1">
-      <label class="check-line"><input type="checkbox" name="waiting_external" value="1" data-waiting-external><span>Waiting on external (not our delay)</span></label>
-      <input name="waiting_on" maxlength="280" placeholder="Waiting on supplier / client" aria-label="Waiting on" data-waiting-input>
+      <input name="reason" maxlength="280" placeholder="Reason (e.g. Waiting on supplier / client)" aria-label="Reason">
+      <label class="check-row"><input type="checkbox" name="waiting" value="1"><span>External delay (remove from overdue count)</span></label>
       <div class="form-footer"><button class="btn btn-primary" type="submit">Push</button></div>
     </form>
   </dialog>`;
@@ -706,7 +698,7 @@ function taskCard(task, today, user, csrf, back) {
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
-      <span class="due">${esc(formatDue(task.due_date))}${waitingMark(task, user, csrf, back)}${rescheduleButton(task, user, today, back)}</span>
+      <span class="due">${esc(formatDue(task.due_date))}${waitingMark(task)}${pushTag(task.push_count, 2)}${rescheduleButton(task, user, today, back)}</span>
       <span class="time">${timeBits(task, user)}${timeActions(task, user, csrf, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
@@ -723,7 +715,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     <td>${assigneeCell(task)}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
-    <td class="due">${esc(formatDue(task.due_date))}${waitingMark(task, user, csrf, back)}${rescheduleButton(task, user, today, back)}</td>
+    <td class="due">${esc(formatDue(task.due_date))}${waitingMark(task)}${pushTag(task.push_count, 2)}${rescheduleButton(task, user, today, back)}</td>
     <td class="time">${timeBits(task, user)}${timeActions(task, user, csrf, back)}</td>
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
@@ -1179,7 +1171,7 @@ export function renderManage({ user, csrf, msg, board, projects }) {
       <tbody>${(board.monthRows || []).map((row) => `<tr><td>${esc(row.label)}</td><td class="num">${row.created}</td><td class="num">${row.done}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.avg == null ? '—' : row.avg}</td></tr>`).join('')}</tbody>
     </table></div>`)}
     <div class="manage-grid">
-      ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a> <span class="hint">${item.owners?.length ? item.owners.map((person) => nameLine(person.name, person.color, person.id)).join(' ') : 'Unassigned'} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
+      ${manageCard('Needs attention', board.hasReview ? 'Late tasks, tasks stuck in review, and tasks with nobody assigned.' : 'Late tasks and tasks with nobody assigned.', board.attention.length ? `<ul class="plain">${board.attention.map((item) => `<li><a href="/tasks/${item.id}">${esc(item.title)}</a>${pushTag(item.pushCount, 1)} <span class="hint">${item.owners?.length ? item.owners.map((person) => nameLine(person.name, person.color, person.id)).join(' ') : 'Unassigned'} · ${esc(item.note)}</span></li>`).join('')}</ul>` : `<p class="hint">${board.hasReview ? 'Nothing overdue, stuck in review, or unassigned.' : 'Nothing overdue or unassigned.'}</p>`)}
       ${manageCard('By project', 'Open, overdue, and finished tasks in this period.', `<div class="table-wrap"><table class="grid">
           <thead><tr><th>Project</th><th class="num">Open</th><th class="num">Overdue</th><th class="num">Done</th></tr></thead>
           <tbody>${board.projects.map((row) => `<tr><td>${esc(row.name)}</td><td class="num">${row.open}</td><td class="num${row.overdue ? ' late' : ''}">${row.overdue}</td><td class="num">${row.done}</td></tr>`).join('') || '<tr><td colspan="4">No project work in this period.</td></tr>'}</tbody>

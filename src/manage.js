@@ -108,7 +108,7 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
   const today = todayDate(now);
   const nowMs = now.getTime();
   const tasks = db.prepare(`
-    SELECT t.id, t.title, t.status, t.due_date, t.waiting_on, t.project_id, t.created_at, t.completed_at, t.updated_at, t.deleted_at,
+    SELECT t.id, t.title, t.status, t.due_date, t.waiting_on, t.external_delay, t.push_count, t.project_id, t.created_at, t.completed_at, t.updated_at, t.deleted_at,
            p.name AS project_name
     FROM tasks t
     LEFT JOIN projects p ON p.id = t.project_id
@@ -308,7 +308,16 @@ export function buildManage(db, { projectId = null, month = null, now = new Date
   }
   for (const task of openNow.filter((item) => !(assignees.get(item.id) || []).length)) {
     if (attention.some((item) => item.id === task.id) || attention.length >= 16) continue;
-    attention.push({ id: task.id, title: task.title, owners: [], note: 'unassigned' });
+    attention.push({ id: task.id, title: task.title, owners: [], note: 'unassigned', pushCount: Number(task.push_count) || 0 });
+  }
+  for (const item of attention) {
+    const task = live.find((row) => row.id === item.id);
+    if (task) item.pushCount = Number(task.push_count) || 0;
+  }
+  for (const task of openNow.filter((item) => Number(item.push_count) >= 1)) {
+    if (attention.some((item) => item.id === task.id) || attention.length >= 16) continue;
+    const owners = (assignees.get(task.id) || []).map((id) => ({ id, name: names.get(id), color: colors.get(id) })).filter((person) => person.name);
+    attention.push({ id: task.id, title: task.title, owners, note: 'pushed', pushCount: Number(task.push_count) || 0 });
   }
 
   const projectRows = db.prepare('SELECT id, name FROM projects ORDER BY name COLLATE NOCASE').all().map((project) => {

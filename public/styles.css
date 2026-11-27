@@ -536,7 +536,7 @@ tr.task-row:hover td { background: #fff7ed; }
 .task-form .field > span, .task-form .label-row > span { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #555; }
 .label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .assign-link { background: none; border: 0; padding: 0; color: #f97316; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline; }
-.task-form input:not([type="hidden"]), .task-form select, .task-form textarea {
+.task-form input:not([type="hidden"]):not([type="checkbox"]), .task-form select, .task-form textarea {
   height: 36px;
   border: 1px solid #ccc;
   background: #fff;
@@ -602,7 +602,7 @@ tr.task-row:hover td { background: #fff7ed; }
 .task-layout .form-card > .field { padding: 10px 12px; }
 .task-layout .form-card > .pair { padding: 0; }
 .task-layout .task-side .pair { grid-template-columns: 1fr; gap: 0; }
-.task-layout .task-form input:not([type="hidden"]),
+.task-layout .task-form input:not([type="hidden"]):not([type="checkbox"]),
 .task-layout .task-form select {
   height: 32px;
 }
@@ -765,8 +765,32 @@ tr.waiting:hover td { background: #efeae0; }
 tr.waiting .due { color: #6b6456; font-weight: 600; }
 tr.waiting td:first-child { box-shadow: inset 3px 0 0 #c4b48a; }
 .waiting-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; background: #f4efe4; color: #6b5e45; border: 1px solid #e0d3b8; font-size: 11px; font-weight: 600; }
-.wait-clear { display: inline; margin-left: 4px; }
-.check-line { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.push-tag { display: inline-block; margin-left: 6px; padding: 0 5px; color: #6b6456; background: #f7f4ee; border: 1px solid #e4dccb; font-size: 11px; font-weight: 600; }
+.check-row, .check-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  font-size: 13px;
+  cursor: pointer;
+}
+.task-form input[type="checkbox"],
+.task-side input[type="checkbox"],
+.quick-dialog input[type="checkbox"],
+.check-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.quick-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.quick-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.quick-field span { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #555; }
+.quick-span { grid-column: span 2; }
 .task-card.waiting { background: #f6f3ec; box-shadow: inset 3px 0 0 #c4b48a; }
 tr.overdue td { background: #fde8e8; }
 tr.overdue:hover td { background: #fbd5d5; }

@@ -64,7 +64,9 @@ export function countsAsOverdue(task, today = todayDate()) {
 }
 
 export function countsForOnTime(task) {
-  return Boolean(task?.due_date) && !externalWait(task);
+  if (!task?.due_date) return false;
+  if (externalWait(task) || Number(task.external_delay)) return false;
+  return true;
 }
 
 export function startOfWeekIso(now = new Date()) {

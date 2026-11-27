@@ -228,6 +228,14 @@ function readWaiting(body) {
   return text || 'Waiting on external';
 }
 
+function waitingFromReschedule(body, reason) {
+  if (body.waiting === '1' || body.waiting === 'on') return (reason || 'External delay').slice(0, 280);
+  if (body.waiting === undefined && String(body.waiting_on || '').trim()) {
+    return String(body.waiting_on).trim().slice(0, 280);
+  }
+  return null;
+}
+
 function parseIdentity(body) {
   const name = String(body.name || '').trim();
   const email = String(body.email || '').trim().toLowerCase();
@@ -814,7 +822,7 @@ export function createApp(config) {
       return res.redirect(`${back}${join}msg=invalid`);
     }
     const reason = String(req.body.reason || '').trim().slice(0, 280);
-    const waitingOn = readWaiting(req.body);
+    const waitingOn = waitingFromReschedule(req.body, reason);
     const updated = updateTask(db, task.id, {
       title: task.title,
       description: task.description,
@@ -826,8 +834,11 @@ export function createApp(config) {
       ...(waitingOn !== undefined ? { waitingOn } : {}),
     });
     logTaskChanges(db, req.user, task, updated);
-    const detail = `Rescheduled due date from ${formatDue(task.due_date)} to ${formatDue(due)}${reason ? `: ${reason}` : ''}`;
+    const waitingChecked = req.body.waiting === '1' || req.body.waiting === 'on';
+    const loggedReason = waitingChecked ? (reason || 'External delay') : reason;
+    const detail = `Rescheduled due date from ${formatDue(task.due_date)} to ${formatDue(due)}${loggedReason ? `: ${loggedReason}` : ''}`;
     addActivity(db, { taskId: task.id, actorId: req.user.id, action: 'due', detail });
+    db.prepare('UPDATE tasks SET push_count = COALESCE(push_count, 0) + 1 WHERE id = ?').run(task.id);
     res.redirect(back);
   });
 
