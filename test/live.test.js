@@ -514,7 +514,8 @@ test('the board logs time from a dialog, complete can log time, and overdue date
     assert.match(board.text, /id="reschedule-dialog"/);
     assert.match(board.text, /data-fill-duration="15m"/);
     assert.match(board.text, />Push</);
-    assert.doesNotMatch(board.text, /timer\/start/);
+    assert.match(board.text, /timer\/start/);
+    assert.match(board.text, />Start</);
     const detail = await page(base, admin.cookies, `/tasks/${taskId}`);
     assert.match(detail.text, /Start stopwatch/);
     assert.match(detail.text, /data-fill-duration="4h"/);

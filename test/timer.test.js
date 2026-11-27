@@ -161,6 +161,7 @@ test('task timers', { timeout: 60000 }, async () => {
     const runningBoard = await page(base, lindi.cookies, '/');
     assert.match(runningBoard.text, /class="dot mine"/);
     assert.match(runningBoard.text, /<th>Time<\/th>/);
+    assert.match(runningBoard.text, /\+ Log[\s\S]{0,400}>Stop</);
 
     const switched = await post(base, lindi.cookies, `/tasks/${secondId}/timer/start`, { _csrf: form.csrf });
     assert.equal(switched.status, 302);

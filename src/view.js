@@ -501,6 +501,24 @@ function logButton(task, back) {
   return `<button type="button" class="btn btn-tiny" data-log-time data-task="${task.id}" data-title="${esc(task.title)}" data-back="${esc(back)}">+ Log</button>`;
 }
 
+function rowTimer(task, user, csrf, back) {
+  if (task.status === 'done' || !canRunTimer(task, user)) return '';
+  const mine = (task.running || []).find((row) => row.user_id === user.id);
+  const action = mine ? 'stop' : 'start';
+  const label = mine ? 'Stop' : 'Start';
+  return `<form class="row-timer" method="post" action="/tasks/${task.id}/timer/${action}">
+    <input type="hidden" name="_csrf" value="${esc(csrf)}">
+    <input type="hidden" name="return" value="board">
+    <input type="hidden" name="back" value="${esc(back)}">
+    <button class="btn btn-tiny" type="submit">${label}</button>
+  </form>`;
+}
+
+function timeActions(task, user, csrf, back) {
+  const buttons = `${logButton(task, back)}${rowTimer(task, user, csrf, back)}`;
+  return buttons ? `<span class="time-actions">${buttons}</span>` : '';
+}
+
 function rescheduleButton(task, user, today, back) {
   if (!isOverdue(task.due_date, task.status, today) || !canQuickStatus(user, task)) return '';
   return `<button type="button" class="btn btn-tiny" data-reschedule data-task="${task.id}" data-title="${esc(task.title)}" data-waiting="${esc(externalWait(task))}" data-back="${esc(back)}">Push</button>`;
@@ -689,7 +707,7 @@ function taskCard(task, today, user, csrf, back) {
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
       <span class="due">${esc(formatDue(task.due_date))}${waitingMark(task, user, csrf, back)}${rescheduleButton(task, user, today, back)}</span>
-      <span class="time">${timeBits(task, user)}${logButton(task, back)}</span>
+      <span class="time">${timeBits(task, user)}${timeActions(task, user, csrf, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
     <div class="card-actions">${rowStatusActions(task, user, back, false, formatDuration(task.time_seconds || 0))}</div>
@@ -706,7 +724,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
     <td class="due">${esc(formatDue(task.due_date))}${waitingMark(task, user, csrf, back)}${rescheduleButton(task, user, today, back)}</td>
-    <td class="time">${timeBits(task, user)}${logButton(task, back)}</td>
+    <td class="time">${timeBits(task, user)}${timeActions(task, user, csrf, back)}</td>
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>
     <td class="row-actions">${rowStatusActions(task, user, back, false, formatDuration(task.time_seconds || 0))}</td>

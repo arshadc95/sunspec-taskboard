@@ -106,7 +106,8 @@ test('complete, kudos, mentions, calendar, team', { timeout: 60000 }, async () =
     assert.doesNotMatch(board.text, />Apply</);
     assert.match(board.text, /\+ Log/);
     assert.match(board.text, /id="log-time-dialog"/);
-    assert.doesNotMatch(board.text, /timer\/start/);
+    assert.match(board.text, /timer\/start/);
+    assert.match(board.text, />Start</);
     assert.match(board.text, /title="Send to review"/);
     assert.match(board.text, /id="review-dialog"/);
     assert.match(board.text, /data-send-review/);

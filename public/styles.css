@@ -755,6 +755,8 @@ table.users .user-name-input { flex: 1 1 0; width: auto; min-width: 0; }
 .dot { color: #16a34a; font-weight: 700; }
 .dot.mine { color: #c2410c; }
 .time { white-space: nowrap; }
+.time-actions { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.time-actions .row-timer { display: inline-flex; }
 table.compact { margin: 6px 0 12px; }
 .num { text-align: left; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
 .when { white-space: nowrap; color: #333; }
@@ -953,6 +955,9 @@ td.num.late { color: #dc2626; font-weight: 700; }
   .filters input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; }
   .fab { display: flex; }
   .task-card .title-link { font-size: 15px; }
+  .card-row .time { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; white-space: normal; }
+  .time-actions { margin-left: 0; }
+  .time-actions .btn { min-height: 28px; height: 28px; padding: 0 8px; }
   .cal-grid { display: none; }
   .cal-agenda { display: block; }
 }
