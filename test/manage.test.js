@@ -1,0 +1,325 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { backlogChart, heatMap, stackedArea, throughputChart } from '../src/charts.js';
+import { COLOR_NAMES, colorForUser, colorsToStore, nextColor, normalizeColor, PALETTE } from '../src/colors.js';
+import { createTask, createUser, openDatabase } from '../src/db.js';
+import { buildManage, clampMonth, monthSpan, taskStatusAt } from '../src/manage.js';
+
+test('a past calendar month runs from the 1st to the next 1st in Johannesburg', () => {
+  const span = monthSpan('2026-10', new Date('2026-11-24T12:00:00+02:00'));
+  assert.equal(span.start, Date.parse('2026-10-01T00:00:00+02:00'));
+  assert.equal(span.end, Date.parse('2026-11-01T00:00:00+02:00'));
+  assert.equal(span.label, 'Oct 2026');
+  assert.equal(span.prev, '2026-09');
+  assert.equal(span.current, false);
+});
+
+test('this month stops at now', () => {
+  const now = new Date('2026-11-24T12:00:00+02:00');
+  const span = monthSpan('2026-11', now);
+  assert.equal(span.start, Date.parse('2026-11-01T00:00:00+02:00'));
+  assert.equal(span.end, now.getTime() + 1);
+  assert.equal(span.current, true);
+  assert.equal(span.label, 'Nov 2026');
+});
+
+test('colours are stored as lowercase hex and a bad value falls back by user id', () => {
+  assert.equal(normalizeColor('#E53935'), '#e53935');
+  assert.equal(normalizeColor('E53935'), '#e53935');
+  assert.equal(normalizeColor(' BLUE '), null);
+  assert.equal(normalizeColor('#1d4ed8'), null);
+  assert.equal(colorForUser(3, 'BLUE'), PALETTE[3 % PALETTE.length]);
+  assert.equal(colorForUser(3, '#E53935'), '#e53935');
+  assert.equal(PALETTE.length, 12);
+  assert.equal(COLOR_NAMES.length, PALETTE.length);
+  assert.equal(new Set(PALETTE).size, PALETTE.length);
+  assert.equal(PALETTE.includes('#f97316'), false);
+});
+
+test('users outside the new palette take distinct colours in id order', () => {
+  const updates = colorsToStore([
+    { id: 4, color: '#E53935' },
+    { id: 1, color: '#1d4ed8' },
+    { id: 2, color: null },
+    { id: 3, color: 'BLUE' },
+  ]);
+  assert.deepEqual(updates, [
+    { id: 1, color: PALETTE[1] },
+    { id: 2, color: PALETTE[2] },
+    { id: 3, color: PALETTE[3] },
+    { id: 4, color: '#e53935' },
+  ]);
+  const fresh = colorsToStore([
+    { id: 8, color: null },
+    { id: 2, color: '' },
+  ]);
+  assert.deepEqual(fresh, [
+    { id: 2, color: PALETTE[0] },
+    { id: 8, color: PALETTE[1] },
+  ]);
+});
+
+test('a new user gets the least used colour from the palette', () => {
+  assert.equal(nextColor([]), PALETTE[0]);
+  assert.equal(nextColor(PALETTE), PALETTE[0]);
+  assert.equal(nextColor([PALETTE[0]]), PALETTE[1]);
+  assert.equal(PALETTE.includes('#f97316'), false);
+});
+
+test('a task stays open from the day it was created until it is done', () => {
+  const task = { created_at: '2026-11-02T08:00:00+02:00', completed_at: '2026-11-10T09:00:00+02:00', status: 'done' };
+  const history = [{ status: 'in_progress', changed_at: '2026-11-24T09:00:00+02:00' }];
+  assert.equal(taskStatusAt(task, history, Date.parse('2026-11-01T23:59:59+02:00')), null);
+  assert.equal(taskStatusAt(task, history, Date.parse('2026-11-05T23:59:59+02:00')), 'todo');
+  assert.equal(taskStatusAt(task, history, Date.parse('2026-11-10T12:00:00+02:00')), 'done');
+  const stillOpen = { created_at: '2026-11-02T08:00:00+02:00', completed_at: null, status: 'in_progress' };
+  assert.equal(taskStatusAt(stillOpen, history, Date.parse('2026-11-20T23:59:59+02:00')), 'todo');
+  assert.equal(taskStatusAt(stillOpen, history, Date.parse('2026-11-24T23:59:59+02:00')), 'in_progress');
+});
+
+test('status, open, and created charts cover the month up to today without a last-day spike', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-charts-'));
+  const db = openDatabase(path.join(dir, 'board.sqlite'));
+  const user = createUser(db, { email: 'ada@example.com', name: 'Ada Lovelace', password: 'password1', role: 'admin' });
+  const early = createTask(db, {
+    title: 'Early todo',
+    description: '',
+    assigneeId: user.id,
+    status: 'todo',
+    priority: null,
+    dueDate: '2026-11-20',
+    projectId: null,
+    createdBy: user.id,
+  });
+  const moved = createTask(db, {
+    title: 'Moved later',
+    description: '',
+    assigneeId: user.id,
+    status: 'in_progress',
+    priority: null,
+    dueDate: '2026-11-20',
+    projectId: null,
+    createdBy: user.id,
+  });
+  db.prepare('UPDATE tasks SET created_at = ? WHERE id = ?').run('2026-11-02T08:00:00.000Z', early);
+  db.prepare('UPDATE tasks SET created_at = ?, status = ? WHERE id = ?').run('2026-11-02T08:00:00.000Z', 'in_progress', moved);
+  db.prepare('DELETE FROM task_status_history').run();
+  db.prepare('INSERT INTO task_status_history (task_id, status, changed_at) VALUES (?, ?, ?)').run(moved, 'in_progress', '2026-11-24T09:00:00+02:00');
+  const now = new Date('2026-11-24T15:00:00+02:00');
+  const board = buildManage(db, { now, month: '2026-11' });
+  db.close();
+  assert.equal(board.cfd.days[0], '11-01');
+  assert.equal(board.cfd.days.at(-1), '11-24');
+  assert.equal(board.cfd.days.includes('11-30'), false);
+  const onSecond = board.cfd.days.indexOf('11-02');
+  const onTwenty = board.cfd.days.indexOf('11-20');
+  const onToday = board.cfd.days.indexOf('11-24');
+  assert.equal(board.cfd.todo[onSecond], 2);
+  assert.equal(board.cfd.in_progress[onSecond], 0);
+  assert.equal(board.cfd.todo[onTwenty], 2);
+  assert.equal(board.cfd.todo[onToday], 1);
+  assert.equal(board.cfd.in_progress[onToday], 1);
+  assert.equal(board.backlog[onSecond].open, 2);
+  assert.equal(board.backlog[onToday].open, 2);
+  assert.equal(board.throughput.find((row) => row.label === '11-02').created, 2);
+  assert.equal(board.throughput.find((row) => row.label === '11-24').created, 0);
+});
+
+test('the workload grid shows the whole month, weekdays, open load, and finished days', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-heat-'));
+  const db = openDatabase(path.join(dir, 'board.sqlite'));
+  const sam = createUser(db, { email: 'sam@example.com', name: 'Sam Cole', password: 'password1', role: 'user' });
+  const kept = createTask(db, {
+    title: 'Still open',
+    description: '',
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
+    status: 'todo',
+    priority: null,
+    dueDate: '2026-11-28',
+    projectId: null,
+    createdBy: sam.id,
+  });
+  const finished = createTask(db, {
+    title: 'Finished',
+    description: '',
+    assigneeId: sam.id,
+    assigneeIds: [sam.id],
+    status: 'done',
+    priority: null,
+    dueDate: '2026-11-10',
+    projectId: null,
+    createdBy: sam.id,
+  });
+  db.prepare('UPDATE tasks SET created_at = ? WHERE id IN (?, ?)').run('2026-11-02T08:00:00+02:00', kept, finished);
+  db.prepare('UPDATE tasks SET completed_at = ?, status = ? WHERE id = ?').run('2026-11-10T10:00:00+02:00', 'done', finished);
+  db.prepare('DELETE FROM task_status_history').run();
+  const now = new Date('2026-11-24T15:00:00+02:00');
+  const board = buildManage(db, { now, month: '2026-11' });
+  db.close();
+  assert.equal(board.heatmap.days.length, 30);
+  assert.equal(board.heatmap.days[0].label, '01');
+  assert.equal(board.heatmap.days[0].weekday, 'S');
+  assert.equal(board.heatmap.days[0].weekend, true);
+  assert.equal(board.heatmap.days[23].today, true);
+  assert.equal(board.heatmap.days[23].weekday, 'T');
+  assert.equal(board.heatmap.days[23].when, 'Tue 24 Nov');
+  assert.equal(board.heatmap.days[24].future, true);
+  const row = board.heatmap.rows.find((item) => item.name === 'Sam Cole');
+  assert.equal(row.cells[1].open, 2);
+  assert.equal(row.cells[9].done, 1);
+  assert.equal(row.cells[9].open, 1);
+  assert.equal(row.cells[23].open, 1);
+  assert.equal(row.cells[23].done, 0);
+  const svg = heatMap(board.heatmap);
+  assert.match(svg, /Sam Cole, Tue 24 Nov: 1 open, 0 done/);
+  assert.match(svg, /class="weekend"/);
+  assert.match(svg, /class="today"/);
+  assert.match(svg, /#1e3a8a/);
+  assert.match(svg, /#f97316/);
+  assert.match(svg, /workload-future/);
+});
+
+test('a person with no tasks still appears in the manage people list', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-people-'));
+  const db = openDatabase(path.join(dir, 'board.sqlite'));
+  const busy = createUser(db, { email: 'busy@example.com', name: 'Sam Cole', password: 'password1', role: 'user' });
+  createUser(db, { email: 'quiet@example.com', name: 'Quiet Person', password: 'password1', role: 'user' });
+  createUser(db, { email: 'alex@example.com', name: 'Alex Kim', password: 'password1', role: 'admin' });
+  createTask(db, {
+    title: 'Open work',
+    description: '',
+    assigneeId: busy.id,
+    assigneeIds: [busy.id],
+    status: 'todo',
+    priority: null,
+    dueDate: null,
+    projectId: null,
+    createdBy: busy.id,
+  });
+  const board = buildManage(db, { now: new Date('2026-11-24T15:00:00+02:00') });
+  db.close();
+  assert.deepEqual(board.people.map((person) => person.name), ['Sam Cole', 'Alex Kim', 'Quiet Person']);
+  assert.equal(board.people.find((person) => person.name === 'Quiet Person').assigned, 0);
+  assert.deepEqual(board.heatmap.rows.map((row) => row.name), ['Sam Cole', 'Alex Kim', 'Quiet Person']);
+});
+
+function barsOf(svg, fill) {
+  return [...svg.matchAll(new RegExp(`<rect x="([\\d.]+)" y="([\\d.]+)" width="([\\d.]+)" height="([\\d.]+)" fill="${fill}"`, 'g'))].map((match) => ({
+    x: Number(match[1]),
+    y: Number(match[2]),
+    h: Number(match[4]),
+  })).filter((bar) => bar.h > 8);
+}
+
+test('status over time groups each day instead of stacking', () => {
+  const days = Array.from({ length: 24 }, (_, index) => `11-${String(index + 1).padStart(2, '0')}`);
+  const zeros = days.map(() => 0);
+  const spike = stackedArea({
+    days,
+    todo: zeros.map((value, index) => (index === 23 ? 6 : value)),
+    in_progress: zeros.map((value, index) => (index === 23 ? 2 : value)),
+    review: zeros,
+    done: zeros,
+  });
+  assert.match(spike, /status-bars/);
+  assert.doesNotMatch(spike, /status-today/);
+  assert.match(spike, /#1e3a8a/);
+  assert.match(spike, /#f97316/);
+  assert.match(spike, /<title>11-24: To do 6<\/title>/);
+  assert.match(spike, /<title>11-24: In progress 2<\/title>/);
+  assert.match(spike, />24</);
+  assert.match(spike, />6</);
+  assert.match(spike, />2</);
+  assert.doesNotMatch(spike, />8</);
+  assert.doesNotMatch(spike, /Review/);
+  assert.doesNotMatch(spike, /<polygon/);
+  const spikeTodo = barsOf(spike, '#1e3a8a');
+  const spikeProgress = barsOf(spike, '#f97316');
+  assert.equal(spikeTodo.length, 1);
+  assert.equal(spikeProgress.length, 1);
+  assert.ok(spikeProgress[0].x > spikeTodo[0].x);
+  assert.ok(Math.abs((spikeTodo[0].y + spikeTodo[0].h) - (spikeProgress[0].y + spikeProgress[0].h)) < 0.2);
+
+  const bars = stackedArea({
+    days: ['11-01', '11-02', '11-03'],
+    todo: [6, 6, 4],
+    in_progress: [2, 2, 2],
+    review: [0, 0, 0],
+    done: [0, 0, 0],
+  });
+  assert.match(bars, /status-bars/);
+  assert.match(bars, /#1e3a8a/);
+  assert.match(bars, /#f97316/);
+  assert.match(bars, /<title>11-01: To do 6<\/title>/);
+  assert.match(bars, />11-01</);
+  assert.match(bars, />11-02</);
+  assert.match(bars, />11-03</);
+  assert.match(bars, />6</);
+  assert.match(bars, />2</);
+  assert.match(bars, />4</);
+  assert.doesNotMatch(bars, />8</);
+  assert.doesNotMatch(bars, /Review/);
+  const todo = barsOf(bars, '#1e3a8a');
+  const progress = barsOf(bars, '#f97316');
+  assert.equal(todo.length, 3);
+  assert.equal(progress.length, 3);
+  todo.forEach((bar, index) => {
+    assert.ok(progress[index].x > bar.x);
+    assert.ok(progress[index].y > bar.y);
+    assert.ok(Math.abs((bar.y + bar.h) - (progress[index].y + progress[index].h)) < 0.2);
+  });
+
+  const open = backlogChart(days.map((label, index) => ({ label, open: index === 23 ? 8 : 0 })));
+  assert.match(open, /open-today/);
+  assert.match(open, /<title>11-24: Open 8<\/title>/);
+  const steady = backlogChart([
+    { label: '11-01', open: 8 },
+    { label: '11-02', open: 8 },
+  ]);
+  assert.match(steady, /<title>11-01: Open 8<\/title>/);
+  assert.doesNotMatch(steady, /open-today/);
+
+  const created = throughputChart(days.map((label, index) => ({ label, created: index === 1 ? 6 : 0, completed: 0 })));
+  assert.match(created, /<title>11-02: Created 6<\/title>/);
+  assert.doesNotMatch(created, /11-24/);
+  const paired = throughputChart([
+    { label: '11-01', created: 4, completed: 2 },
+    { label: '11-02', created: 3, completed: 1 },
+  ]);
+  const made = barsOf(paired, '#d4d4d4');
+  const finished = barsOf(paired, '#f97316');
+  assert.equal(made.length, 2);
+  assert.equal(finished.length, 2);
+  made.forEach((bar, index) => {
+    assert.ok(finished[index].x > bar.x);
+    assert.ok(Math.abs((bar.y + bar.h) - (finished[index].y + finished[index].h)) < 0.2);
+  });
+});
+
+test('the month stepper stays between the first task and the current month', () => {
+  const open = clampMonth(null, '2026-08-15', '2026-11-24');
+  assert.equal(open.ym, '2026-11');
+  assert.equal(open.title, 'November 2026');
+  assert.equal(open.canNext, false);
+  assert.equal(open.canPrev, true);
+  assert.equal(open.prev, '2026-10');
+
+  const middle = clampMonth('2026-10', '2026-08-15', '2026-11-24');
+  assert.equal(middle.ym, '2026-10');
+  assert.equal(middle.canPrev, true);
+  assert.equal(middle.canNext, true);
+  assert.equal(middle.next, '2026-11');
+
+  const floor = clampMonth('2020-01', '2026-08-15', '2026-11-24');
+  assert.equal(floor.ym, '2026-08');
+  assert.equal(floor.canPrev, false);
+  assert.equal(floor.canNext, true);
+
+  const future = clampMonth('2027-03', '2026-08-15', '2026-11-24');
+  assert.equal(future.ym, '2026-11');
+  assert.equal(future.canNext, false);
+});

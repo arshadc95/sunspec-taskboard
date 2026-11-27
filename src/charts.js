@@ -1,0 +1,262 @@
+import { isPaletteColor } from './colors.js';
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]));
+}
+
+export function sparkline(values, color = '#111') {
+  const nums = values?.length ? values : [0];
+  const w = 96;
+  const h = 28;
+  const max = Math.max(...nums, 1);
+  const min = Math.min(...nums, 0);
+  const span = max - min || 1;
+  const pts = nums.map((value, index) => {
+    const x = nums.length === 1 ? w / 2 : (index / (nums.length - 1)) * (w - 4) + 2;
+    const y = h - 3 - ((value - min) / span) * (h - 8);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true"><polyline fill="none" stroke="${color}" stroke-width="1.6" points="${pts}"/></svg>`;
+}
+
+export function ring(pct) {
+  if (pct == null) return '';
+  const length = 2 * Math.PI * 10;
+  const dash = (Math.max(0, Math.min(100, pct)) / 100) * length;
+  return `<svg class="ring" viewBox="0 0 28 28" width="28" height="28" aria-hidden="true"><circle cx="14" cy="14" r="10" fill="none" stroke="#e5e5e5" stroke-width="3"/><circle cx="14" cy="14" r="10" fill="none" stroke="#f97316" stroke-width="3" stroke-dasharray="${dash.toFixed(1)} ${length.toFixed(1)}" transform="rotate(-90 14 14)"/></svg>`;
+}
+
+function axisTicks(max) {
+  const top = Math.max(1, Math.ceil(max));
+  let step = 1;
+  if (top > 20) step = Math.ceil(top / 4);
+  else if (top > 10) step = 5;
+  else if (top > 5) step = 2;
+  const ticks = [];
+  for (let value = 0; value < top; value += step) ticks.push(value);
+  if (ticks[ticks.length - 1] !== top) ticks.push(top);
+  return ticks;
+}
+
+function legendRow(items, x0, y) {
+  return items.map(([label, color], index) => {
+    const x = x0 + index * 118;
+    return `<rect x="${x}" y="${y}" width="8" height="8" fill="${color}"/><text x="${x + 12}" y="${y + 8}" font-size="10" fill="#111" font-family="Inter, sans-serif">${label}</text>`;
+  }).join('');
+}
+
+export function throughputChart(rows) {
+  const source = rows || [];
+  const active = source.filter((row) => row.created || row.completed);
+  const plotted = active.length && active.length < 2 ? active : source;
+  if (!plotted.some((row) => row.created || row.completed)) return '';
+  const w = 640;
+  const h = 168;
+  const left = 28;
+  const top = 18;
+  const plotH = h - top - 28;
+  const max = Math.max(1, ...plotted.flatMap((row) => [row.created, row.completed]));
+  const plotW = w - left - 8;
+  const slot = plotW / plotted.length;
+  const y = (value) => top + plotH - (value / max) * plotH;
+  const bars = plotted.map((row, index) => {
+    const x = left + index * slot + Math.min(8, slot * 0.15);
+    const bw = Math.max(8, (slot - 16) / 2);
+    const createdH = Math.max(0, top + plotH - y(row.created));
+    const doneH = Math.max(0, top + plotH - y(row.completed));
+    return `<rect x="${x.toFixed(1)}" y="${y(row.created).toFixed(1)}" width="${bw.toFixed(1)}" height="${createdH.toFixed(1)}" fill="#d4d4d4"><title>${esc(row.label)}: Created ${row.created}</title></rect>`
+      + `<rect x="${(x + bw + 3).toFixed(1)}" y="${y(row.completed).toFixed(1)}" width="${bw.toFixed(1)}" height="${doneH.toFixed(1)}" fill="#f97316"><title>${esc(row.label)}: Done ${row.completed}</title></rect>`
+      + `<text x="${(x + bw).toFixed(1)}" y="${h - 8}" text-anchor="middle" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(row.label)}</text>`;
+  }).join('');
+  const ticks = axisTicks(max).map((value) => {
+    const yy = y(value);
+    return `<text x="2" y="${(yy + 3).toFixed(1)}" font-size="9" fill="#555" font-family="Inter, sans-serif">${value}</text>`;
+  }).join('');
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${top + plotH}" x2="${w - 8}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + ticks
+    + `<rect x="${left}" y="2" width="8" height="8" fill="#d4d4d4"/><text x="${left + 12}" y="10" font-size="10" fill="#111" font-family="Inter, sans-serif">Created</text>`
+    + `<rect x="${left + 78}" y="2" width="8" height="8" fill="#f97316"/><text x="${left + 90}" y="10" font-size="10" fill="#111" font-family="Inter, sans-serif">Done</text>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Created vs done">${axis}${bars}</svg>`;
+}
+
+const FLOW = [
+  ['todo', 'To do', '#1e3a8a'],
+  ['in_progress', 'In progress', '#f97316'],
+  ['review', 'Review', '#0f766e'],
+  ['done', 'Done', '#d1d5db'],
+];
+
+function flowSeries(cfd) {
+  const days = cfd?.days || [];
+  const flow = FLOW.filter(([key]) => (cfd?.[key] || []).some((value) => value > 0));
+  const totals = days.map((_, index) => flow.reduce((sum, [key]) => sum + (Number(cfd[key][index]) || 0), 0));
+  return { days, flow, totals };
+}
+
+function dateAxis(days, totals, slot, left, h) {
+  const labelEvery = Math.max(1, Math.ceil(days.length / 8));
+  const positions = days.map((_, index) => left + index * slot + slot / 2);
+  const minGap = slot >= 36 ? 32 : 13;
+  const chosen = [];
+  const fits = (index) => chosen.every((other) => Math.abs(positions[index] - positions[other]) >= minGap);
+  days.forEach((_, index) => {
+    if (totals[index] > 0 && fits(index)) chosen.push(index);
+  });
+  days.forEach((_, index) => {
+    const sparse = index % labelEvery === 0 || index === days.length - 1;
+    if (!totals[index] && sparse && fits(index)) chosen.push(index);
+  });
+  return chosen.sort((a, b) => a - b).map((index) => {
+    const text = slot >= 36 ? days[index] : String(days[index]).slice(-2);
+    return `<text x="${positions[index].toFixed(1)}" y="${h - 8}" text-anchor="middle" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(text)}</text>`;
+  }).join('');
+}
+
+export function stackedArea(cfd) {
+  const { days, flow, totals } = flowSeries(cfd);
+  if (!days.length || !flow.length || !totals.some((value) => value > 0)) return '';
+  const w = 640;
+  const h = 210;
+  const left = 32;
+  const top = 28;
+  const bottom = 28;
+  const plotH = h - top - bottom;
+  const plotW = w - left - 12;
+  const values = flow.flatMap(([key]) => days.map((_, index) => Number(cfd[key][index]) || 0));
+  const max = Math.max(1, ...values);
+  const slot = plotW / days.length;
+  const groupGap = Math.min(8, slot * 0.28);
+  const innerGap = flow.length > 1 ? Math.min(3, slot * 0.08) : 0;
+  const span = Math.max(flow.length * 2, slot - groupGap);
+  const bw = (span - innerGap * (flow.length - 1)) / flow.length;
+  const base = top + plotH;
+  const yAt = (value) => base - (value / max) * plotH;
+  const bars = days.map((day, index) => {
+    const groupX = left + index * slot + (slot - span) / 2;
+    return flow.map(([key, label, color], series) => {
+      const value = Number(cfd[key][index]) || 0;
+      if (!value) return '';
+      const x = groupX + series * (bw + innerGap);
+      const y = yAt(value);
+      const height = base - y;
+      const rect = `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(height, 1).toFixed(1)}" fill="${color}"><title>${esc(day)}: ${label} ${value}</title></rect>`;
+      const digits = String(value).length;
+      const room = bw >= digits * 5.5 && y >= 18;
+      const valueLabel = room
+        ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 3).toFixed(1)}" text-anchor="middle" font-size="9" fill="#111" font-family="Inter, sans-serif">${value}</text>`
+        : '';
+      return rect + valueLabel;
+    }).join('');
+  }).join('');
+  const ticks = axisTicks(max).map((value) => `<text x="2" y="${(yAt(value) + 3).toFixed(1)}" font-size="9" fill="#555" font-family="Inter, sans-serif">${value}</text>`).join('');
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${base}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${base}" x2="${w - 12}" y2="${base}" stroke="#e5e5e5"/>`
+    + ticks
+    + dateAxis(days, totals, slot, left, h);
+  return `<svg class="chart status-bars" viewBox="0 0 ${w} ${h}" role="img" aria-label="Status over time">${legendRow(flow.map(([, label, color]) => [label, color]), left, 6)}${axis}${bars}</svg>`;
+}
+
+export function scatterChart(points, p85) {
+  if (!points?.length) return '';
+  const w = 640;
+  const h = 190;
+  const left = 36;
+  const top = 16;
+  const bottom = 28;
+  const plotH = h - top - bottom;
+  const plotW = w - left - 16;
+  const maxY = Math.max(1, p85 || 0, ...points.map((point) => point.days)) * 1.15;
+  const dates = points.map((point) => Date.parse(`${point.date}T12:00:00Z`)).filter(Number.isFinite);
+  const minX = Math.min(...dates);
+  const maxX = Math.max(...dates);
+  const span = Math.max(86400000, maxX - minX);
+  const xAt = (date) => left + ((Date.parse(`${date}T12:00:00Z`) - minX) / span) * plotW;
+  const yAt = (days) => top + plotH - (days / maxY) * plotH;
+  const dots = points.map((point) => `<circle cx="${xAt(point.date).toFixed(1)}" cy="${yAt(point.days).toFixed(1)}" r="4" fill="#111"><title>${esc(point.title)} · ${point.days} days · ${esc(point.date)}</title></circle>`).join('');
+  const lineY = p85 == null ? 0 : yAt(p85);
+  const line = p85 == null ? '' : `<line x1="${left}" x2="${left + plotW}" y1="${lineY.toFixed(1)}" y2="${lineY.toFixed(1)}" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5 4"/><text x="${left + 6}" y="${(lineY < 28 ? lineY + 14 : lineY - 6).toFixed(1)}" font-size="11" fill="#f97316" font-family="Inter, sans-serif">Most tasks finished within ${p85} days</text>`;
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${top + plotH}" x2="${left + plotW}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<text x="2" y="${top + 8}" font-size="9" fill="#555" font-family="Inter, sans-serif">${Math.ceil(maxY)}</text>`
+    + `<text x="2" y="${top + plotH}" font-size="9" fill="#555" font-family="Inter, sans-serif">0</text>`
+    + `<text x="${left}" y="${h - 6}" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(points[0].date.slice(5))}</text>`
+    + `<text x="${left + plotW}" y="${h - 6}" text-anchor="end" font-size="9" fill="#555" font-family="Inter, sans-serif">${esc(points[points.length - 1].date.slice(5))}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Days per finished task">${axis}${line}${dots}</svg>`;
+}
+
+export function backlogChart(points) {
+  if (!points?.length || !points.some((point) => point.open > 0)) return '';
+  const active = points.filter((point) => point.open > 0);
+  if (active.length < 2) {
+    const point = active[0];
+    return `<svg class="chart open-today" viewBox="0 0 640 64" role="img" aria-label="Open tasks today"><rect x="28" y="28" width="240" height="22" fill="#374151"><title>${esc(point.label)}: Open ${point.open}</title></rect><text x="28" y="18" font-size="11" fill="#111" font-family="Inter, sans-serif">${esc(point.label)}: ${point.open} open</text></svg>`;
+  }
+  const w = 640;
+  const h = 160;
+  const left = 32;
+  const top = 12;
+  const bottom = 22;
+  const plotH = h - top - bottom;
+  const plotW = w - left - 12;
+  const values = points.map((point) => point.open);
+  const max = Math.max(...values, 1);
+  const xAt = (index) => (points.length === 1 ? left + plotW / 2 : left + (index / (points.length - 1)) * plotW);
+  const yAt = (value) => top + plotH - (value / max) * plotH;
+  const line = values.map((value, index) => `${xAt(index).toFixed(1)},${yAt(value).toFixed(1)}`).join(' ');
+  const area = `${left},${top + plotH} ${line} ${xAt(points.length - 1).toFixed(1)},${top + plotH}`;
+  const probes = values.map((value, index) => `<circle cx="${xAt(index).toFixed(1)}" cy="${yAt(value).toFixed(1)}" r="6" fill="transparent"><title>${esc(points[index].label)}: Open ${value}</title></circle>`).join('');
+  const ticks = axisTicks(max).map((value) => `<text x="2" y="${(yAt(value) + 3).toFixed(1)}" font-size="9" fill="#555" font-family="Inter, sans-serif">${value}</text>`).join('');
+  const axis = `<line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + `<line x1="${left}" y1="${top + plotH}" x2="${left + plotW}" y2="${top + plotH}" stroke="#e5e5e5"/>`
+    + ticks;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Open tasks over time">${axis}<polygon points="${area}" fill="#374151" opacity="0.12"/><polyline fill="none" stroke="#111" stroke-width="2" points="${line}"/>${probes}</svg>`;
+}
+
+export function heatMap(heatmap) {
+  const rows = heatmap?.rows || [];
+  const days = heatmap?.days || [];
+  if (!rows.length || !days.length) return '';
+  const cell = 24;
+  const label = 124;
+  const head = 34;
+  const w = label + days.length * cell + 8;
+  const h = head + rows.length * cell + 6;
+  const max = heatmap.max || 1;
+  const hatch = `<defs><pattern id="workload-future" width="6" height="6" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="#f3f4f6"/><path d="M0 6 L6 0" stroke="#d1d5db" stroke-width="1"/></pattern></defs>`;
+  let body = hatch;
+  days.forEach((day, index) => {
+    const x = label + index * cell;
+    if (day.weekend) body += `<rect class="weekend" x="${x}" y="0" width="${cell - 2}" height="${h}" fill="#eef0f2"/>`;
+    if (day.today) body += `<rect class="today" x="${x - 1}" y="1" width="${cell}" height="${head - 4}" fill="none" stroke="#111" stroke-width="1.5"/>`;
+    body += `<text x="${x + 2}" y="14" font-size="9" fill="${day.future ? '#9ca3af' : '#111'}" font-family="Inter, sans-serif"${day.today ? ' font-weight="700"' : ''}>${esc(day.label)}</text>`;
+    body += `<text x="${x + 6}" y="26" font-size="8" fill="${day.future ? '#9ca3af' : '#555'}" font-family="Inter, sans-serif">${esc(day.weekday)}</text>`;
+  });
+  rows.forEach((row, rowIndex) => {
+    const y = head + rowIndex * cell;
+    if (isPaletteColor(row.color)) body += `<circle cx="8" cy="${y + 10}" r="3" fill="${row.color}"/>`;
+    body += `<text x="16" y="${y + 14}" font-size="10" fill="#111" font-family="Inter, sans-serif">${esc(row.name)}</text>`;
+    row.cells.forEach((cellValue, index) => {
+      const day = days[index];
+      const open = cellValue?.open || 0;
+      const done = cellValue?.done || 0;
+      const x = label + index * cell;
+      const title = `${row.name}, ${day.when}: ${open} open, ${done} done`;
+      let fill = '#f8fafc';
+      let opacity = 1;
+      if (day.future) fill = 'url(#workload-future)';
+      else if (!open && day.weekend) fill = '#e5e7eb';
+      else {
+        fill = '#1e3a8a';
+        opacity = open ? 0.18 + 0.82 * (open / max) : 0.08;
+      }
+      body += `<rect x="${x}" y="${y}" width="${cell - 3}" height="${cell - 3}" fill="${fill}" opacity="${opacity.toFixed(2)}"><title>${esc(title)}</title></rect>`;
+      if (!day.future && done > 0) {
+        body += `<circle cx="${x + (cell - 3) / 2}" cy="${y + (cell - 3) / 2}" r="4" fill="#f97316"><title>${esc(title)}</title></circle>`;
+      }
+    });
+  });
+  return `<svg class="chart workload" viewBox="0 0 ${w} ${h}" role="img" aria-label="Open tasks and finished tasks by person">${body}</svg>`;
+}
