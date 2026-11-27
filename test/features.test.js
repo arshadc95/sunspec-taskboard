@@ -104,6 +104,12 @@ test('projects, activity, mentions, csv, management, attachments', { timeout: 60
     assert.match(listed.text, /title="Yellow"/);
     assert.doesNotMatch(listed.text, /class="swatch c-\d+" title="[^"]*" aria-hidden/);
     const form = await page(base, admin.cookies, '/tasks/new');
+    assert.match(form.text, />Today</);
+    assert.match(form.text, />Tomorrow</);
+    assert.match(form.text, />Next week</);
+    assert.match(form.text, /data-due=""\s*>None</);
+    assert.match(form.text, /class="seg pri-todo on"/);
+    assert.match(form.text, /class="seg pri-none on"/);
     const created = await post(base, admin.cookies, '/tasks', {
       _csrf: form.csrf,
       title: 'Tubecon logger',

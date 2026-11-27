@@ -541,8 +541,8 @@ tr.task-row:hover td { background: #fff7ed; }
 }
 .task-form textarea { height: auto; min-height: 96px; padding: 8px 10px; }
 .task-form .title-input { font-size: 18px; }
-.segments, .task-form .chips { display: flex; width: 100%; }
-.task-form .seg, .task-form .chip {
+.segments, .task-form .chips, .task-side .chips { display: flex; width: 100%; }
+.task-form .seg, .task-side .seg, .task-form .chip, .task-side .chip {
   flex: 1 1 0;
   height: 36px;
   margin: 0;
@@ -555,13 +555,13 @@ tr.task-row:hover td { background: #fff7ed; }
   font-weight: 600;
   white-space: nowrap;
 }
-.task-form .seg + .seg, .task-form .chip + .chip { margin-left: -1px; }
-.task-form .seg.on, .task-form .chip.on { background: #000; color: #fff; border-color: #000; position: relative; z-index: 1; }
-.task-form .seg.pri-low:not(.on) { box-shadow: inset 4px 0 0 #64748b; }
-.task-form .seg.pri-med:not(.on) { box-shadow: inset 4px 0 0 #1d4ed8; }
-.task-form .seg.pri-high:not(.on) { box-shadow: inset 4px 0 0 #f97316; }
-.task-form .seg.pri-urgent:not(.on) { box-shadow: inset 4px 0 0 #dc2626; }
-.task-form .seg.pri-none:not(.on) { box-shadow: inset 4px 0 0 #999; }
+.task-form .seg + .seg, .task-side .seg + .seg, .task-form .chip + .chip, .task-side .chip + .chip { margin-left: -1px; }
+.task-form .seg.on, .task-side .seg.on, .task-form .chip.on, .task-side .chip.on { background: #000; color: #fff; border-color: #000; position: relative; z-index: 1; }
+.task-form .seg.pri-low:not(.on), .task-side .seg.pri-low:not(.on) { box-shadow: inset 4px 0 0 #64748b; }
+.task-form .seg.pri-med:not(.on), .task-side .seg.pri-med:not(.on) { box-shadow: inset 4px 0 0 #1d4ed8; }
+.task-form .seg.pri-high:not(.on), .task-side .seg.pri-high:not(.on) { box-shadow: inset 4px 0 0 #f97316; }
+.task-form .seg.pri-urgent:not(.on), .task-side .seg.pri-urgent:not(.on) { box-shadow: inset 4px 0 0 #dc2626; }
+.task-form .seg.pri-none:not(.on), .task-side .seg.pri-none:not(.on) { box-shadow: inset 4px 0 0 #999; }
 .due-row { display: flex; gap: 16px; align-items: center; }
 .due-row .chips { flex: 1; min-width: 0; }
 .due-row input[type="date"] { width: 148px; flex: 0 0 148px; }

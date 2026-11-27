@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { backlogChart, heatMap, ring, scatterChart, sparkline, stackedArea, throughputChart } from './charts.js';
 import { COLOR_NAMES, PALETTE, colorClass, colorForUser } from './colors.js';
 import { PRIORITIES, ROLES, STATUSES, labelOf } from './constants.js';
-import { clockInJohannesburg, dateInJohannesburg, entrySeconds, formatDateTime, formatDayLabel, formatDue, formatDuration, formatEntryWhen, isOverdue, shiftDate } from './time.js';
+import { clockInJohannesburg, dateInJohannesburg, entrySeconds, formatDateTime, formatDayLabel, formatDue, formatDuration, formatEntryWhen, isOverdue, shiftDate, todayDate } from './time.js';
 
 const standards = JSON.parse(readFileSync(new URL('./data/standards.json', import.meta.url), 'utf8'));
 
@@ -339,7 +339,7 @@ function taskForm({ task, users, projects, csrf, canEdit, currentUser, today, fr
   const value = task || {};
   const projectName = value.project_name || '';
   const due = value.due_date || '';
-  const day = today || '';
+  const day = today || todayDate();
   const status = value.status || 'todo';
   const chips = day
     ? [['today', 'Today', day], ['tomorrow', 'Tomorrow', shiftDate(day, 1)], ['week', 'Next week', shiftDate(day, 7)], ['none', 'None', '']]

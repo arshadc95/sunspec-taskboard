@@ -541,6 +541,7 @@ export function createApp(config) {
       canEdit: true,
       canDelete: false,
       commentPerms: new Map(),
+      today: todayDate(),
     }));
   });
 
