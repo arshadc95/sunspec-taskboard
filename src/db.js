@@ -246,6 +246,7 @@ function migrate(db) {
   if (!db.prepare('PRAGMA table_info(tasks)').all().some((column) => column.name === 'push_count')) {
     db.exec('ALTER TABLE tasks ADD COLUMN push_count INTEGER NOT NULL DEFAULT 0');
   }
+  backfillPushCounts(db);
   const userColumns = db.prepare('PRAGMA table_info(users)').all();
   if (!userColumns.some((column) => column.name === 'is_bot')) {
     db.exec('ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0');
@@ -831,6 +832,25 @@ export function findOrCreateProject(db, name) {
     }
     throw error;
   }
+}
+
+export function backfillPushCounts(db) {
+  db.prepare(`
+    UPDATE tasks
+    SET push_count = (
+      SELECT COUNT(*) FROM activity
+      WHERE activity.task_id = tasks.id
+        AND activity.action = 'due'
+        AND activity.detail LIKE 'Rescheduled due date%'
+    )
+    WHERE push_count = 0
+      AND EXISTS (
+        SELECT 1 FROM activity
+        WHERE activity.task_id = tasks.id
+          AND activity.action = 'due'
+          AND activity.detail LIKE 'Rescheduled due date%'
+      )
+  `).run();
 }
 
 export function addActivity(db, { taskId, actorId, action, detail }) {

@@ -760,12 +760,15 @@ table.users .user-name-input { flex: 1 1 0; width: auto; min-width: 0; }
 table.compact { margin: 6px 0 12px; }
 .num { text-align: left; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
 .when { white-space: nowrap; color: #333; }
+tr.pushed td { background: #fff7ed; }
+tr.pushed:hover td { background: #ffedd5; }
+tr.pushed td:first-child { box-shadow: inset 3px 0 0 #f97316; }
 tr.waiting td { background: #f6f3ec; }
 tr.waiting:hover td { background: #efeae0; }
 tr.waiting .due { color: #6b6456; font-weight: 600; }
 tr.waiting td:first-child { box-shadow: inset 3px 0 0 #c4b48a; }
 .waiting-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; background: #f4efe4; color: #6b5e45; border: 1px solid #e0d3b8; font-size: 11px; font-weight: 600; }
-.push-tag { display: inline-block; margin-left: 6px; padding: 0 5px; color: #6b6456; background: #f7f4ee; border: 1px solid #e4dccb; font-size: 11px; font-weight: 600; }
+.push-tag { display: inline-block; margin-left: 6px; padding: 0 5px; background: #fff1e0; color: #9a3412; border: 1px solid #f5c28b; font-size: 11px; font-weight: 600; }
 .check-row, .check-line {
   display: flex;
   align-items: center;
@@ -940,6 +943,8 @@ td.num.late { color: #dc2626; font-weight: 700; }
 .bottom-nav { display: none; }
 .task-card { background: #fff; border: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 4px; }
 .task-card.overdue { background: #fde8e8; box-shadow: inset 3px 0 0 var(--danger); }
+.task-card.pushed, .m-card.pushed { background: #fff7ed; box-shadow: inset 3px 0 0 #f97316; border-left: 3px solid #f97316; }
+.task-card.waiting, .m-card.waiting { background: #f6f3ec; box-shadow: inset 3px 0 0 #c4b48a; border-left: 3px solid #c4b48a; }
 .card-meta { color: var(--muted); font-size: 12px; }
 .card-row { display: flex; gap: 10px; flex-wrap: wrap; }
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { backdropCloses } from '../public/dialog-close.js';
-import { capRunningTimers, createTask, createUser, deleteTask, openDatabase, teamBoard, unreadMentionCount } from '../src/db.js';
+import { addActivity, capRunningTimers, createTask, createUser, deleteTask, openDatabase, teamBoard, unreadMentionCount } from '../src/db.js';
 import { buildManage } from '../src/manage.js';
 import { publish } from '../src/events.js';
 import { createApp } from '../src/server.js';
@@ -111,6 +111,100 @@ test('old tasks gain a waiting_on column', () => {
   assert.ok(names.includes('external_delay'));
   assert.ok(names.includes('push_count'));
   db.close();
+});
+
+test('past reschedules fill push_count once, and a later due date on save counts as a push', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'taskboard-push-backfill-'));
+  const file = path.join(dir, 'board.sqlite');
+  const seeded = openDatabase(file);
+  const userId = createUser(seeded, { email: 'sam@example.com', name: 'Sam', password: 'sam-password', role: 'user' }).id;
+  const taskId = createTask(seeded, {
+    title: 'Already moved',
+    description: '',
+    assigneeId: userId,
+    status: 'todo',
+    priority: null,
+    dueDate: '2026-11-20',
+    projectId: null,
+    createdBy: userId,
+  });
+  addActivity(seeded, { taskId, actorId: userId, action: 'due', detail: 'Due: 18 Nov 2026 → 20 Nov 2026' });
+  addActivity(seeded, { taskId, actorId: userId, action: 'due', detail: 'Rescheduled due date from 18 Nov 2026 to 20 Nov 2026' });
+  addActivity(seeded, { taskId, actorId: userId, action: 'due', detail: 'Rescheduled due date from 20 Nov 2026 to 25 Nov 2026: supplier' });
+  seeded.prepare('UPDATE tasks SET push_count = 0 WHERE id = ?').run(taskId);
+  seeded.close();
+  const again = openDatabase(file);
+  assert.equal(again.prepare('SELECT push_count FROM tasks WHERE id = ?').get(taskId).push_count, 2);
+  again.close();
+  const third = openDatabase(file);
+  assert.equal(third.prepare('SELECT push_count FROM tasks WHERE id = ?').get(taskId).push_count, 2);
+  third.close();
+
+  const app = createApp({
+    port: 8082,
+    sessionSecret: 'test-session-secret-value',
+    dbPath: path.join(dir, 'live.sqlite'),
+    dataDir: dir,
+    adminEmail: 'arshad@example.com',
+    adminPassword: 'super-password',
+    adminName: 'Arshad',
+    loginMax: 8,
+    loginWindowMs: 15 * 60 * 1000,
+  });
+  const db = app.locals.db;
+  const { server, base } = await listen(app);
+  try {
+    const admin = await login(base, 'arshad@example.com', 'super-password');
+    const form = await page(base, admin.cookies, '/tasks/new');
+    const created = await post(base, admin.cookies, '/tasks', {
+      _csrf: form.csrf,
+      title: 'Slip the date',
+      description: '',
+      status: 'todo',
+      priority: '',
+      due_date: '2026-11-20',
+      assignee_id: '',
+      project_id: '',
+      new_project: '',
+    });
+    const id = Number(created.headers.get('location').match(/\/tasks\/(\d+)/)[1]);
+    const detail = await page(base, admin.cookies, `/tasks/${id}`);
+    const saved = await post(base, admin.cookies, `/tasks/${id}`, {
+      _csrf: detail.csrf,
+      title: 'Slip the date',
+      description: '',
+      status: 'todo',
+      priority: '',
+      due_date: '2026-11-28',
+      assignee_ids: '',
+      project_id: '',
+      project_name: '',
+    });
+    assert.equal(saved.status, 302);
+    assert.equal(db.prepare('SELECT push_count, due_date FROM tasks WHERE id = ?').get(id).push_count, 1);
+    assert.equal(db.prepare('SELECT due_date FROM tasks WHERE id = ?').get(id).due_date, '2026-11-28');
+    const board = await page(base, admin.cookies, '/');
+    assert.match(board.text, /task-row pushed/);
+    assert.match(board.text, /m-card pushed/);
+    assert.match(board.text, /Pushed ×1/);
+    assert.doesNotMatch(board.text, / style=/);
+    const earlier = await post(base, admin.cookies, `/tasks/${id}`, {
+      _csrf: detail.csrf,
+      title: 'Slip the date',
+      description: '',
+      status: 'todo',
+      priority: '',
+      due_date: '2026-11-22',
+      assignee_ids: '',
+      project_id: '',
+      project_name: '',
+    });
+    assert.equal(earlier.status, 302);
+    assert.equal(db.prepare('SELECT push_count FROM tasks WHERE id = ?').get(id).push_count, 1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+  }
 });
 
 function jar() {
@@ -627,7 +721,11 @@ test('a task waiting on someone else is left out of overdue counts and on-time p
     assert.match(csv.split('\n')[0], /Waiting On/);
     assert.match(csv, /Waiting on supplier/);
     assert.doesNotMatch(calm.text, /wait-clear/);
-    assert.doesNotMatch(calm.text, /Pushed ×/);
+    assert.match(calm.text, /task-row waiting pushed/);
+    assert.match(calm.text, /m-card waiting pushed/);
+    assert.match(calm.text, /Pushed ×1/);
+    assert.match(calm.text, /Waiting: Waiting on supplier/);
+    assert.doesNotMatch(calm.text, / style=/);
     assert.equal(db.prepare('SELECT push_count FROM tasks WHERE id = ?').get(taskId).push_count, 1);
     const once = await page(base, admin.cookies, `/tasks/${taskId}`);
     assert.match(once.text, /Pushed ×1/);

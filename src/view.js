@@ -532,7 +532,7 @@ function waitingFields(task, off) {
     ${reason ? `<p class="waiting-badge">Waiting: ${esc(reason)}</p>` : ''}`;
 }
 
-function pushTag(count, min = 2) {
+function pushTag(count, min = 1) {
   const n = Number(count) || 0;
   if (n < min) return '';
   return `<span class="push-tag">Pushed ×${n}</span>`;
@@ -545,8 +545,9 @@ function waitingMark(task) {
 }
 
 function dueTone(task, today) {
-  if (externalWait(task)) return ' waiting';
-  return countsAsOverdue(task, today) ? ' overdue' : '';
+  const pushed = task.status !== 'done' && Number(task.push_count) >= 1 ? ' pushed' : '';
+  if (externalWait(task)) return ` waiting${pushed}`;
+  return `${countsAsOverdue(task, today) ? ' overdue' : ''}${pushed}`;
 }
 
 function timeBits(task, user) {
@@ -692,13 +693,13 @@ function mentionBits(task) {
 
 function taskCard(task, today, user, csrf, back) {
   const mention = mentionBits(task);
-  return `<article class="task-card${dueTone(task, today)}${task.justAdded ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
+  return `<article class="task-card m-card${dueTone(task, today)}${task.justAdded ? ' just-added' : ''}${mention.unread}" data-href="/tasks/${task.id}">
     <div class="card-top">${mention.mark}<a class="title-link" href="/tasks/${task.id}">${esc(task.title)}</a>${reviewerMark(task)}${mention.snip}</div>
     <div class="card-meta">${esc(task.project_name || 'No project')} · ${task.assignees?.length ? assigneeCell(task) : 'Unassigned'}</div>
     <div class="card-row">
       <span class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</span>
       <span class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</span>
-      <span class="due">${esc(formatDue(task.due_date))}${waitingMark(task)}${pushTag(task.push_count, 2)}${rescheduleButton(task, user, today, back)}</span>
+      <span class="due">${esc(formatDue(task.due_date))}${waitingMark(task)}${task.status === 'done' ? '' : pushTag(task.push_count)}${rescheduleButton(task, user, today, back)}</span>
       <span class="time">${timeBits(task, user)}${timeActions(task, user, csrf, back)}</span>
     </div>
     <div class="card-meta">${task.comment_count} comments · ${esc(formatDateTime(task.updated_at))}</div>
@@ -715,7 +716,7 @@ function taskRow(task, today, user, csrf, back, highlight) {
     <td>${assigneeCell(task)}</td>
     <td class="status status-${esc(task.status)}">${esc(labelOf(STATUSES, task.status))}</td>
     <td class="pri pri-${esc(task.priority || 'none')}">${esc(labelOf(PRIORITIES, task.priority) || '—')}</td>
-    <td class="due">${esc(formatDue(task.due_date))}${waitingMark(task)}${pushTag(task.push_count, 2)}${rescheduleButton(task, user, today, back)}</td>
+    <td class="due">${esc(formatDue(task.due_date))}${waitingMark(task)}${task.status === 'done' ? '' : pushTag(task.push_count)}${rescheduleButton(task, user, today, back)}</td>
     <td class="time">${timeBits(task, user)}${timeActions(task, user, csrf, back)}</td>
     <td class="num">${task.comment_count}</td>
     <td class="when">${esc(formatDateTime(task.updated_at))}</td>

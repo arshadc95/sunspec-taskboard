@@ -638,6 +638,11 @@ export function createApp(config) {
     const projectId = projectFromBody(db, req.body, task.project_id);
     if (projectId === false) return res.redirect(`/tasks/${task.id}?msg=invalid`);
     const updated = updateTask(db, task.id, { ...parsed, projectId });
+    const oldDue = String(task.due_date || '');
+    const newDue = String(updated?.due_date || '');
+    if (task.status !== 'done' && oldDue && newDue > oldDue) {
+      db.prepare('UPDATE tasks SET push_count = COALESCE(push_count, 0) + 1 WHERE id = ?').run(task.id);
+    }
     const added = (updated?.assignee_ids || []).filter((userId) => !(task.assignee_ids || []).includes(userId) && userId !== req.user.id);
     notifyMentions(db, { taskId: task.id, userIds: added, actorId: req.user.id, text: `Assigned: ${updated.title}` });
     logTaskChanges(db, req.user, task, updated);
